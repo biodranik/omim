@@ -128,6 +128,8 @@ public:
   OSMTimeRange & operator()(time_t timestamp);
   OSMTimeRange & operator()(std::string const & timestr, char const * timefmt="%d-%m-%Y %R");
 
+  std::string ToString() const;
+
 private:
   void parse();
 };

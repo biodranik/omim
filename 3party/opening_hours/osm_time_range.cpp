@@ -150,8 +150,12 @@ namespace osmoh
       s << e;
     if (!w.weekdays.empty() && !w.timespan.empty())
       s << ' ';
-    for (auto const & e : w.timespan)
-      s << e;
+    for (size_t i = 0; i < w.timespan.size(); ++i)
+    {
+      s << w.timespan[i];
+      if (i != w.timespan.size() - 1)
+        s << ',';
+    }
 
     return s << w.state;
   }
@@ -950,4 +954,18 @@ OSMTimeRange & OSMTimeRange::operator () (std::string const & timestr, char cons
   std::stringstream ss(timestr);
   ss >> std::get_time(&when, timefmt);
   return this->operator()(std::mktime(&when));
+}
+
+std::string OSMTimeRange::ToString() const
+{
+  std::ostringstream stream;
+  stream << m_sourceString << std::endl;
+  stream << "Output: ";
+  for (auto const & rule : m_rules)
+  {
+    stream << rule << ";";
+  }
+  stream << m_comment;
+  stream << std::endl;
+  return stream.str();
 }

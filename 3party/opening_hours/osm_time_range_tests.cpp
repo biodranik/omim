@@ -195,6 +195,43 @@ BOOST_AUTO_TEST_CASE(OpeningHours_TimeHit)
   }
 }
 
+BOOST_AUTO_TEST_CASE(OpeningHours_IsOpen)
+{
+  {
+    OSMTimeRange oh("24/7; Sa-Su off");
+    BOOST_CHECK(oh.IsValid());
+    BOOST_CHECK_EQUAL(oh("14-10-2015 20:00").IsOpen(), true);
+    BOOST_CHECK_EQUAL(oh("17-10-2015 8:00").IsClosed(), true);
+  }
+  {
+    OSMTimeRange oh("Mo-Fr 14:00-24:00; We off; Sa,Su 16:30-24:00");
+    BOOST_CHECK(oh.IsValid());
+    BOOST_CHECK_EQUAL(oh("14-10-2015 20:00").IsClosed(), true);
+    BOOST_CHECK_EQUAL(oh("13-10-2015 10:00").IsClosed(), true);
+    BOOST_CHECK_EQUAL(oh("14-10-2015 10:00").IsClosed(), true);
+    BOOST_CHECK_EQUAL(oh("17-10-2015 10:00").IsClosed(), true);
+    BOOST_CHECK_EQUAL(oh("17-10-2015 16:30").IsOpen(), true);
+    BOOST_CHECK_EQUAL(oh("13-10-2015 16:30").IsOpen(), true);
+  }
+  {
+    OSMTimeRange oh("24/7; We off; Tu-Th 00:01-23:00");
+    BOOST_CHECK(oh.IsValid());
+    BOOST_CHECK_EQUAL(oh("14-10-2015 20:00").IsClosed(), true);
+    BOOST_CHECK_EQUAL(oh("13-10-2015 20:00").IsOpen(), true);
+    BOOST_CHECK_EQUAL(oh("14-10-2015 00:59").IsClosed(), true);
+  }
+  {
+    OSMTimeRange oh("Mo-Fr 00:00-24:00; PH off");
+    BOOST_CHECK(oh.IsValid());
+    BOOST_CHECK_EQUAL(oh("14-10-2015 20:00").IsOpen(), true);
+  }
+  {
+    OSMTimeRange oh("11:00-24:00 closed; 01:00-11:00 open");
+    BOOST_CHECK(oh.IsValid());
+    BOOST_CHECK_EQUAL(oh("14-10-2015 00:30").IsOpen(), false);
+  }
+}
+
 BOOST_AUTO_TEST_CASE(OpeningHours_StaticSet)
 {
   {
@@ -496,6 +533,8 @@ BOOST_AUTO_TEST_CASE( OpeningHours_CountFailed )
       num_failed += count;
       desc[count]++;
       BOOST_TEST_MESSAGE("-- " << count << " :[" << datastr << "]");
+    } else {
+      std::cout << "Input (" << count << "): " << oh.ToString();
     }
     num_total += count;
   }
