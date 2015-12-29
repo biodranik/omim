@@ -165,7 +165,7 @@ DayEventType CalculateDayEventTime(int year, int month, int day,
 
 } // namespace
 
-pair<time_t, time_t> SunriseSunsetForLocalDay(int year, int month, int day, double latitude, double longitude)
+pair<time_t, time_t> SunriseSunsetForUtcDay(int year, int month, int day, double latitude, double longitude)
 {
   ASSERT_GREATER_OR_EQUAL(month, 1, ());
   ASSERT_LESS_OR_EQUAL(month, 12, ());
@@ -194,32 +194,21 @@ pair<time_t, time_t> SunriseSunsetForLocalDay(int year, int month, int day, doub
   return make_pair(sunriseUtc, sunsetUtc);
 }
 
-pair<time_t, time_t> SunriseSunsetForUtc(time_t utcTime, double latitude, double longitude,
-                                         int locationTimezoneOffsetInSeconds)
+pair<time_t, time_t> SunriseSunsetForUtc(time_t utcTime, double latitude, double longitude)
 {
   // Store copies not pointers for safe usage in multithreading environment.
-  struct tm stm;
-  // TODO(AlexZ): Should we really check that localtime/gmtime returned nullptr?
-  if (locationTimezoneOffsetInSeconds == kUseLocalTimezone)
-    stm = *localtime(&utcTime);
-  else
-  {
-    // Trick to get correct local time at a custom far away timezone.
-    utcTime = utcTime + locationTimezoneOffsetInSeconds;
-    stm = *gmtime(&utcTime);
-  }
+  struct tm const stm = *gmtime(&utcTime);
 
   int const year = stm.tm_year + 1900;
   int const mon = stm.tm_mon + 1;
   int const day = stm.tm_mday;
 
-  return SunriseSunsetForLocalDay(year, mon, day, latitude, longitude);
+  return SunriseSunsetForUtcDay(year, mon, day, latitude, longitude);
 }
 
-pair<DayTimeType, time_t> GetNextLocalSunriseOrSunset(time_t timeUtc, double latitude, double longitude,
-                                                      int locationTimezoneOffsetInSeconds)
+pair<DayTimeType, time_t> GetNextUtcSunriseOrSunset(time_t timeUtc, double latitude, double longitude)
 {
-  auto const sunriseSunsetUtc = SunriseSunsetForUtc(timeUtc, latitude, longitude, locationTimezoneOffsetInSeconds);
+  auto const sunriseSunsetUtc = SunriseSunsetForUtc(timeUtc, latitude, longitude);
 
   if (sunriseSunsetUtc.first == my::INVALID_TIME_STAMP ||
       sunriseSunsetUtc.second == my::INVALID_TIME_STAMP)

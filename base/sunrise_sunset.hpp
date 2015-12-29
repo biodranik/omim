@@ -14,9 +14,7 @@
 /// @note date year/month/day is specified for the interesting point latituda/longitude
 /// @note for polar day sunrise is set to year/month/day,0:0:0 and sunset is set to sunrise + 24h
 /// @note for polar night sunrise and sunset both are set to year/month/day,0:0:0 - 0 sec of day
-pair<time_t, time_t> SunriseSunsetForLocalDay(int year, int month, int day, double latitude, double longitude);
-
-static int constexpr const kUseLocalTimezone = 0x10ca1000;
+pair<time_t, time_t> SunriseSunsetForUtcDay(int year, int month, int day, double latitude, double longitude);
 
 /// Get times of the sunrise and the sunset for today in a given location.
 /// To get correct result for a distant location please specify it's time zone offset.
@@ -29,8 +27,7 @@ static int constexpr const kUseLocalTimezone = 0x10ca1000;
 /// @note if sunrise/sunset occur before the specified timeUtc then next sunrise and sunset are returned.
 /// @note for polar day sunrise is set to year/month/day,0:0:0 and sunset is set to sunrise + 24h - 24h of sun
 /// @note for polar night sunrise and sunset both are set to year/month/day,0:0:0 - 0 sec of sun
-pair<time_t, time_t> SunriseSunsetForUtc(time_t utcTime, double latitude, double longitude,
-                                         int locationTimezoneOffsetInSeconds = kUseLocalTimezone);
+pair<time_t, time_t> SunriseSunsetForUtc(time_t utcTime, double latitude, double longitude);
 
 enum class DayTimeType
 {
@@ -51,5 +48,4 @@ string DebugPrint(DayTimeType type);
 /// @returns pair where first is type of the day type and second is UTC time when
 /// day time type will be changed. For polar day and polar night second is timeUtc + 24h.
 /// @note if error occurs then pair(DayTime, -1) is returned.
-pair<DayTimeType, time_t> GetNextLocalSunriseOrSunset(time_t timeUtc, double latitude, double longitude,
-                                                      int locationTimezoneOffsetInSeconds = kUseLocalTimezone);
+pair<DayTimeType, time_t> GetNextUtcSunriseOrSunset(time_t timeUtc, double latitude, double longitude);
