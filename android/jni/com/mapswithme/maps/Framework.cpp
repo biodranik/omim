@@ -517,14 +517,9 @@ void Framework::DownloadingProgressUpdate(ActiveMapsLayout::TGroup const & group
   }
 }
 
-// Fills mapobject's metadata from UserMark
-void Framework::InjectMetadata(JNIEnv * env, jclass const clazz, jobject const mapObject, UserMark const * userMark)
+// Fills mapobject's metadata
+void Framework::InjectMetadata(JNIEnv * env, jclass const clazz, jobject const mapObject, feature::Metadata const & metadata)
 {
-  using feature::Metadata;
-
-  Metadata metadata;
-  frm()->FindClosestPOIMetadata(userMark->GetPivot(), metadata);
-
   static jmethodID const addId = env->GetMethodID(clazz, "addMetadata", "(ILjava/lang/String;)V");
   ASSERT ( addId, () );
 
@@ -532,7 +527,7 @@ void Framework::InjectMetadata(JNIEnv * env, jclass const clazz, jobject const m
   {
     // TODO: It is not a good idea to pass raw strings to UI. Calling separate getters should be a better way.
     // Upcoming change: how to pass opening hours (parsed) into Editor's UI? How to get edited changes back?
-    jstring metaString = t == Metadata::FMD_WIKIPEDIA ?
+    jstring metaString = t == feature::Metadata::FMD_WIKIPEDIA ?
                          jni::ToJavaString(env, metadata.GetWikiURL()) :
                          jni::ToJavaString(env, metadata.Get(t));
     env->CallVoidMethod(mapObject, addId, t, metaString);
@@ -1145,9 +1140,13 @@ extern "C"
   {
     PoiMarkPoint const * poiMark = frm()->GetAddressMark(MercatorBounds::FromLatLon(lat, lon));
     search::AddressInfo info;
-    auto const feature = poiMark->GetFeature();
+    feature::Metadata metadata;
+    auto const * feature = poiMark->GetFeature();
     if (feature)
+    {
+      metadata = feature->GetMetadata();
       info = frm()->GetPOIAddressInfo(*feature);
+    }
     // TODO(AlexZ): else case?
 
     static jclass const klass = jni::GetGlobalClassRef(env, "com/mapswithme/maps/bookmarks/data/MapObject$Poi");
@@ -1158,8 +1157,7 @@ extern "C"
                                              lat, lon, jni::ToJavaString(env, info.GetPinType()));
     ASSERT(mapObject, ());
 
-
-    g_framework->InjectMetadata(env, klass, mapObject, poiMark);
+    g_framework->InjectMetadata(env, klass, mapObject, metadata);
 
     return mapObject;
   }
