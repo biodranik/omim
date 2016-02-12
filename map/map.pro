@@ -27,6 +27,7 @@ HEADERS += \
     gps_track_storage.hpp \
     gps_tracker.hpp \
     mwm_url.hpp \
+    place_page_info.hpp \
     storage_bridge.hpp \
     styled_point.hpp \
     track.hpp \
