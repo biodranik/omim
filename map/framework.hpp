@@ -31,6 +31,8 @@
 #include "routing/router.hpp"
 #include "routing/routing_session.hpp"
 
+#include "editor/new_feature_categories.hpp"
+
 #include "geometry/rect2d.hpp"
 #include "geometry/screenbase.hpp"
 
@@ -637,6 +639,7 @@ public:
   bool GetEditableFeature(FeatureID const & fid, osm::EditableFeature & ef) const;
   void SaveEditedFeature(osm::EditableFeature const & ef) const;
   void DeleteFeature(FeatureID const & fid) const;
+  osm::NewFeatureCategories GetEditorCategories() const;
   //@}
 
 private:

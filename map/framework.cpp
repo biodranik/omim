@@ -2600,3 +2600,8 @@ void Framework::DeleteFeature(FeatureID const & fid) const
   // TODO(AlexZ): Use FeatureID in the editor interface.
   osm::Editor::Instance().DeleteFeature(*GetFeatureByID(fid));
 }
+
+osm::NewFeatureCategories Framework::GetEditorCategories() const
+{
+  return osm::Editor::Instance().GetNewFeatureCategories();
+}
