@@ -1,186 +1,155 @@
 #include "qt/editor_dialog.hpp"
 
-#include "map/framework.hpp"
+#include "indexer/editable_feature.hpp"
 
-#include "search/result.hpp"
+#include "base/string_utils.hpp"
 
-#include "indexer/classificator.hpp"
-#include "indexer/feature.hpp"
-#include "indexer/feature_algo.hpp"
-#include "indexer/osm_editor.hpp"
-
-#include "base/collection_cast.hpp"
-
-#include "std/set.hpp"
-#include "std/vector.hpp"
+#include "std/algorithm.hpp"
 
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QDialogButtonBox>
+#include <QtWidgets/QGridLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
 #include <QtWidgets/QPushButton>
-#include <QtWidgets/QVBoxLayout>
 
 #include <QtCore/QSignalMapper>
-
-using feature::Metadata;
 
 constexpr char const * kStreetObjectName = "addr:street";
 constexpr char const * kHouseNumberObjectName = "addr:housenumber";
 
-EditorDialog::EditorDialog(QWidget * parent, FeatureType & feature, Framework & frm) : QDialog(parent)
+EditorDialog::EditorDialog(QWidget * parent, osm::EditableFeature & ef) : QDialog(parent), m_editableFeature(ef)
 {
-  osm::Editor & editor = osm::Editor::Instance();
+  QGridLayout * grid = new QGridLayout();
+  int row = 0;
 
-  QVBoxLayout * vLayout = new QVBoxLayout();
+  { // Coordinates.
+    ms::LatLon const ll = ef.GetLatLon();
+    grid->addWidget(new QLabel("Latitude/Longitude:"), row, 0);
+    QHBoxLayout * coords = new QHBoxLayout();
+    coords->addWidget(new QLabel(QString::fromStdString(strings::to_string_dac(ll.lat, 7) + " " +
+                                                        strings::to_string_dac(ll.lon, 7))));
+    grid->addLayout(coords, row++, 1);
+  }
 
-  // Zero uneditable row: coordinates.
-  ms::LatLon const ll = MercatorBounds::ToLatLon(feature::GetCenter(feature));
-  QHBoxLayout * coordinatesRow = new QHBoxLayout();
-  coordinatesRow->addWidget(new QLabel("Latitude, Longitude:"));
-  QLabel * coords = new QLabel(QString::fromStdString(strings::to_string_dac(ll.lat, 6) +
-                                                      "," + strings::to_string_dac(ll.lon, 6)));
-  coords->setTextInteractionFlags(Qt::TextSelectableByMouse);
-  coordinatesRow->addWidget(coords);
-  vLayout->addLayout(coordinatesRow);
+  { // Feature types.
+    grid->addWidget(new QLabel("Localized Type:"), row, 0);
+    grid->addWidget(new QLabel(QString::fromStdString(ef.GetLocalizedType())), row++, 1);
 
-  // First uneditable row: feature types.
-  string strTypes;
-  feature.ForEachType([&strTypes](uint32_t type)
-  {
-    strTypes += classif().GetReadableObjectName(type) + " ";
-  });
-  QHBoxLayout * typesRow = new QHBoxLayout();
-  typesRow->addWidget(new QLabel("Types:"));
-  typesRow->addWidget(new QLabel(QString::fromStdString(strTypes)));
-  vLayout->addLayout(typesRow);
+    grid->addWidget(new QLabel("Raw Types:"), row, 0);
+    grid->addWidget(new QLabel(QString::fromStdString(DebugPrint(ef.GetTypes()))), row++, 1);
+  }
 
-  osm::EditableProperties const editable = editor.GetEditableProperties(feature);
+  if (ef.IsNameEditable())
+  { // Names.
+    char const * defaultLangStr = StringUtf8Multilang::GetLangByCode(StringUtf8Multilang::kDefaultCode);
+    // Default name editor is always displayed, even if feature name is empty.
+    grid->addWidget(new QLabel(QString("Name:")), row, 0);
+    QLineEdit * defaultName = new QLineEdit();
+    defaultName->setObjectName(defaultLangStr);
+    QGridLayout * namesGrid = new QGridLayout();
+    int namesRow = 0;
+    namesGrid->addWidget(defaultName, namesRow++, 0, 1, 0);
 
-  // Rows block: Name(s) label(s) and text input.
-  char const * defaultLangStr = StringUtf8Multilang::GetLangByCode(StringUtf8Multilang::kDefaultCode);
-  // Default name editor is always displayed, even if feature name is empty.
-  QHBoxLayout * defaultNameRow = new QHBoxLayout();
-  defaultNameRow->addWidget(new QLabel(QString("name")));
-  QLineEdit * defaultNamelineEdit = new QLineEdit();
-  defaultNamelineEdit->setReadOnly(!editable.m_name);
-  defaultNamelineEdit->setObjectName(defaultLangStr);
-  defaultNameRow->addWidget(defaultNamelineEdit);
-  vLayout->addLayout(defaultNameRow);
-
-  feature.ForEachName([&](int8_t langCode, string const & name) -> bool
-  {
-    if (langCode == StringUtf8Multilang::kDefaultCode)
-      defaultNamelineEdit->setText(QString::fromStdString(name));
-    else
+    for (osm::LocalizedName const & ln : ef.GetLocalizedName())
     {
-      QHBoxLayout * nameRow = new QHBoxLayout();
-      char const * langStr = StringUtf8Multilang::GetLangByCode(langCode);
-      nameRow->addWidget(new QLabel(QString("name:") + langStr));
-      QLineEdit * lineEditName = new QLineEdit(QString::fromStdString(name));
-      lineEditName->setReadOnly(!editable.m_name);
-      lineEditName->setObjectName(langStr);
-      nameRow->addWidget(lineEditName);
-      vLayout->addLayout(nameRow);
+      if (ln.m_code == StringUtf8Multilang::kDefaultCode)
+      {
+        defaultName->setText(QString::fromStdString(ln.m_name));
+      }
+      else
+      {
+        char const * langStr = StringUtf8Multilang::GetLangByCode(ln.m_code);
+        namesGrid->addWidget(new QLabel(ln.m_lang), namesRow, 0);
+        QLineEdit * lineEditName = new QLineEdit(QString::fromStdString(ln.m_name));
+        lineEditName->setReadOnly(!ef.IsNameEditable());
+        lineEditName->setObjectName(langStr);
+        namesGrid->addWidget(lineEditName, namesRow++, 1);
+      }
     }
-    return true; // true is needed to enumerate all languages.
-  });
-
-  // Address rows.
-  vector<string> nearbyStreets = frm.GetNearbyFeatureStreets(feature);
-  // If feature does not have a specified street, display empty combo box.
-  search::AddressInfo const info = frm.GetFeatureAddressInfo(feature);
-  if (info.m_street.empty())
-    nearbyStreets.insert(nearbyStreets.begin(), "");
-  QHBoxLayout * streetRow = new QHBoxLayout();
-  streetRow->addWidget(new QLabel(QString(kStreetObjectName)));
-  QComboBox * cmb = new QComboBox();
-  for (auto const & street : nearbyStreets)
-    cmb->addItem(street.c_str());
-  cmb->setEditable(editable.m_address);
-  cmb->setEnabled(editable.m_address);
-  cmb->setObjectName(kStreetObjectName);
-  streetRow->addWidget(cmb);
-  vLayout->addLayout(streetRow);
-  QHBoxLayout * houseRow = new QHBoxLayout();
-  houseRow->addWidget(new QLabel(QString(kHouseNumberObjectName)));
-  QLineEdit * houseLineEdit = new QLineEdit();
-  houseLineEdit->setText(info.m_house.c_str());
-  houseLineEdit->setReadOnly(!editable.m_address);
-  houseLineEdit->setObjectName(kHouseNumberObjectName);
-  houseRow->addWidget(houseLineEdit);
-  vLayout->addLayout(houseRow);
-
-  // All  metadata rows.
-  QVBoxLayout * metaRows = new QVBoxLayout();
-  for (Metadata::EType const field : editable.m_metadata)
-  {
-    QString const fieldName = QString::fromStdString(DebugPrint(field));
-    QHBoxLayout * fieldRow = new QHBoxLayout();
-    fieldRow->addWidget(new QLabel(fieldName));
-    QLineEdit * lineEdit = new QLineEdit(QString::fromStdString(feature.GetMetadata().Get(field)));
-    // Mark line editor to query it's text value when editing is finished.
-    lineEdit->setObjectName(fieldName);
-    fieldRow->addWidget(lineEdit);
-    metaRows->addLayout(fieldRow);
+    grid->addLayout(namesGrid, row++, 1);
   }
-  vLayout->addLayout(metaRows);
 
-  // Dialog buttons.
-  QDialogButtonBox * buttonBox = new QDialogButtonBox(
-        QDialogButtonBox::Cancel | QDialogButtonBox::Save);
-  connect(buttonBox, SIGNAL(accepted()), this, SLOT(accept()));
-  connect(buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
-  // Delete button should send custom int return value from dialog.
-  QPushButton * deletePOIButton = new QPushButton("Delete POI");
-  QSignalMapper * signalMapper = new QSignalMapper();
-  connect(deletePOIButton, SIGNAL(clicked()), signalMapper, SLOT(map()));
-  signalMapper->setMapping(deletePOIButton, QDialogButtonBox::DestructiveRole);
-  connect(signalMapper, SIGNAL(mapped(int)), this, SLOT(done(int)));
-  buttonBox->addButton(deletePOIButton, QDialogButtonBox::DestructiveRole);
-  QHBoxLayout * buttonsRowLayout = new QHBoxLayout();
-  buttonsRowLayout->addWidget(buttonBox);
-  vLayout->addLayout(buttonsRowLayout);
+  if (ef.IsAddressEditable())
+  { // Address rows.
+    vector<string> nearbyStreets = ef.GetNearbyStreets();
+    // If feature does not have a specified street, display empty combo box.
+    if (ef.GetStreet().empty())
+      nearbyStreets.insert(nearbyStreets.begin(), "");
+    grid->addWidget(new QLabel(QString(kStreetObjectName)), row, 0);
+    QComboBox * cmb = new QComboBox();
+    for (auto const & street : nearbyStreets)
+      cmb->addItem(street.c_str());
+    cmb->setObjectName(kStreetObjectName);
+    grid->addWidget(cmb, row++, 1);
 
-  setLayout(vLayout);
-  setWindowTitle("POI Editor");
+    grid->addWidget(new QLabel(QString(kHouseNumberObjectName)), row, 0);
+    QLineEdit * houseLineEdit = new QLineEdit();
+    houseLineEdit->setText(ef.GetHouseNumber().c_str());
+    houseLineEdit->setObjectName(kHouseNumberObjectName);
+    grid->addWidget(houseLineEdit, row++, 1);
+  }
+
+  { // Only editable metadata rows.
+    for (auto const field : ef.GetEditableFields())
+    {
+      feature::Metadata::EType const cfield = static_cast<feature::Metadata::EType>(field);
+      QString const fieldName = QString::fromStdString(DebugPrint(cfield));
+      grid->addWidget(new QLabel(fieldName), row, 0);
+      QLineEdit * lineEdit = new QLineEdit(QString::fromStdString(ef.GetMetadata().Get(cfield)));
+      // Mark line editor to query it's text value when editing is finished.
+      lineEdit->setObjectName(fieldName);
+      grid->addWidget(lineEdit, row++, 1);
+    }
+  }
+
+  { // Dialog buttons.
+    QDialogButtonBox * buttonBox = new QDialogButtonBox(QDialogButtonBox::Cancel | QDialogButtonBox::Save);
+    connect(buttonBox, SIGNAL(accepted()), this, SLOT(OnSave()));
+    connect(buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
+    // Delete button should send custom int return value from dialog.
+    QPushButton * deletePOIButton = new QPushButton("Delete POI");
+    QSignalMapper * signalMapper = new QSignalMapper();
+    connect(deletePOIButton, SIGNAL(clicked()), signalMapper, SLOT(map()));
+    signalMapper->setMapping(deletePOIButton, QDialogButtonBox::DestructiveRole);
+    connect(signalMapper, SIGNAL(mapped(int)), this, SLOT(done(int)));
+    buttonBox->addButton(deletePOIButton, QDialogButtonBox::DestructiveRole);
+    grid->addWidget(buttonBox, row++, 1);
+  }
+
+  setLayout(grid);
+  setWindowTitle("OSM Editor");
 }
 
-StringUtf8Multilang EditorDialog::GetEditedNames() const
+void EditorDialog::OnSave()
 {
-  StringUtf8Multilang names;
-  for (int8_t langCode = StringUtf8Multilang::kDefaultCode; langCode < StringUtf8Multilang::kMaxSupportedLanguages; ++langCode)
+  // Store all edits.
+  if (m_editableFeature.IsNameEditable())
   {
-    QLineEdit * le = findChild<QLineEdit *>(StringUtf8Multilang::GetLangByCode(langCode));
-    if (!le)
-      continue;
-    string const name = le->text().toStdString();
-    if (!name.empty())
-      names.AddString(langCode, name);
+    StringUtf8Multilang names;
+    for (int8_t langCode = StringUtf8Multilang::kDefaultCode; langCode < StringUtf8Multilang::kMaxSupportedLanguages; ++langCode)
+    {
+      QLineEdit * le = findChild<QLineEdit *>(StringUtf8Multilang::GetLangByCode(langCode));
+      if (!le)
+        continue;
+      string const name = le->text().toStdString();
+      if (!name.empty())
+        names.AddString(langCode, name);
+    }
+    m_editableFeature.SetName(names);
   }
-  return names;
-}
-
-Metadata EditorDialog::GetEditedMetadata() const
-{
-  Metadata metadata;
-  for (int type = Metadata::FMD_CUISINE; type < Metadata::FMD_COUNT; ++type)
+  if (m_editableFeature.IsAddressEditable())
   {
-    QLineEdit * editor = findChild<QLineEdit *>(QString::fromStdString(DebugPrint(static_cast<Metadata::EType>(type))));
+    m_editableFeature.SetHouseNumber(findChild<QLineEdit *>(kHouseNumberObjectName)->text().toStdString());
+    m_editableFeature.SetStreet(findChild<QComboBox *>()->currentText().toStdString());
+  }
+  for (feature::Metadata::EType mdType : m_editableFeature.GetEditableFields())
+  {
+    QLineEdit * editor = findChild<QLineEdit *>(QString::fromStdString(DebugPrint(mdType)));
     if (editor)
-      metadata.Set(static_cast<Metadata::EType>(type), editor->text().toStdString());
+      m_editableFeature.GetMetadata().Set(mdType, editor->text().toStdString());
   }
-  return metadata;
-}
 
-string EditorDialog::GetEditedStreet() const
-{
-  QComboBox const * cmb = findChild<QComboBox *>();
-  return cmb->currentText().toStdString();
-}
-
-string EditorDialog::GetEditedHouseNumber() const
-{
-  return findChild<QLineEdit *>(kHouseNumberObjectName)->text().toStdString();
+  accept();
 }

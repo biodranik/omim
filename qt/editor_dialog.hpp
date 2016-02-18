@@ -1,24 +1,19 @@
 #pragma once
 
-#include "indexer/feature_meta.hpp"
-
-#include "coding/multilang_utf8_string.hpp"
-
-#include "std/string.hpp"
-
 #include <QtWidgets/QDialog>
 
-class FeatureType;
-class Framework;
-class QLineEdit;
+namespace osm
+{
+class EditableFeature;
+}  // namespace osm
 
 class EditorDialog : public QDialog
 {
   Q_OBJECT
 public:
-  EditorDialog(QWidget * parent, FeatureType & feature, Framework & frm);
-  StringUtf8Multilang GetEditedNames() const;
-  feature::Metadata GetEditedMetadata() const;
-  string GetEditedStreet() const;
-  string GetEditedHouseNumber() const;
+  EditorDialog(QWidget * parent, osm::EditableFeature & ef);
+private slots:
+  void OnSave();
+private:
+  osm::EditableFeature & m_editableFeature;
 };
