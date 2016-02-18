@@ -38,7 +38,7 @@ using MWMPlacePageCellTypeValueMap = map<MWMPlacePageCellType, string>;
 
 @protocol MWMPlacePageEntityProtocol <NSObject>
 
-- (UserMark const *)userMark;
+- (place_page::Info const &)info;
 
 @end
 

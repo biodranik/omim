@@ -34,7 +34,7 @@
 @property (nonatomic, readonly) BOOL isDirectionViewShown;
 
 - (void)dismissPlacePage;
-- (void)showPlacePageWithUserMark:(unique_ptr<UserMarkCopy>)userMark;
+- (void)showPlacePage:(place_page::Info const &)info;
 - (void)reloadPlacePage;
 
 #pragma mark - MWMNavigationDashboardManager

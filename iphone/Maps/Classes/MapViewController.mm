@@ -223,21 +223,19 @@ NSString * const kAuthorizationSegue = @"Map2AuthorizationSegue";
   [self.controlsManager dismissPlacePage];
 }
 
-- (void)onUserMarkClicked:(unique_ptr<UserMarkCopy>)mark
+- (void)onMapObjectDeselected
 {
-  if (mark == nullptr)
-  {
-    [self dismissPlacePage];
-    
-    auto & f = GetFramework();
-    if (!f.HasActiveUserMark() && self.controlsManager.searchHidden && !f.IsRouteNavigable())
-      self.controlsManager.hidden = !self.controlsManager.hidden;
-  }
-  else
-  {
-    self.controlsManager.hidden = NO;
-    [self.controlsManager showPlacePageWithUserMark:move(mark)];
-  }
+  [self dismissPlacePage];
+
+  auto & f = GetFramework();
+  if (!f.HasActiveUserMark() && self.controlsManager.searchHidden && !f.IsRouteNavigable())
+    self.controlsManager.hidden = !self.controlsManager.hidden;
+}
+
+- (void)onMapObjectSelected:(place_page::Info const &)info
+{
+  self.controlsManager.hidden = NO;
+  [self.controlsManager showPlacePage:info];
 }
 
 - (void)onMyPositionClicked:(id)sender
@@ -524,12 +522,8 @@ NSString * const kAuthorizationSegue = @"Map2AuthorizationSegue";
 {
   Framework & f = GetFramework();
 
-  using UserMarkActivatedFnT = void (*)(id, SEL, unique_ptr<UserMarkCopy>);
-  using PlacePageDismissedFnT = void (*)(id, SEL);
-
-  SEL userMarkSelector = @selector(onUserMarkClicked:);
-  UserMarkActivatedFnT userMarkFn = (UserMarkActivatedFnT)[self methodForSelector:userMarkSelector];
-  f.SetUserMarkActivationListener(bind(userMarkFn, self, userMarkSelector, _1));
+  f.SetMapSelectionListeners([self](place_page::Info const & info) { [self onMapObjectSelected:info]; },
+                             [self](){ [self onMapObjectDeselected]; });
   m_predictor = [[LocationPredictor alloc] initWithObserver:self];
   self.forceRoutingStateChange = ForceRoutingStateChangeNone;
   self.userTouchesAction = UserTouchesActionNone;
@@ -662,7 +656,7 @@ NSString * const kAuthorizationSegue = @"Map2AuthorizationSegue";
     case routing::IRouter::ResultCode::NoError:
     {
       self.controlsManager.routeBuildingProgress = 100.;
-      f.ActivateUserMark(nullptr, true);
+      f.DeactivateMapSelection(true);
       self.controlsManager.routeBuildingProgress = 100.;
       self.controlsManager.searchHidden = YES;
       if (self.forceRoutingStateChange == ForceRoutingStateChangeStartFollowing)
@@ -844,7 +838,7 @@ NSString * const kAuthorizationSegue = @"Map2AuthorizationSegue";
 {
   Framework & f = GetFramework();
   if (self.popoverVC)
-    f.ActivateUserMark(nullptr, true);
+    f.DeactivateMapSelection(true);
 
   CGFloat const sf = self.view.contentScaleFactor;
 

@@ -5,6 +5,7 @@
 #include "map/bookmark.hpp"
 #include "map/bookmark_manager.hpp"
 #include "map/country_tree.hpp"
+#include "map/place_page_info.hpp"
 #include "map/feature_vec_model.hpp"
 #include "map/mwm_url.hpp"
 #include "map/track.hpp"
@@ -43,6 +44,11 @@
 #include "std/unique_ptr.hpp"
 #include "std/vector.hpp"
 #include "std/weak_ptr.hpp"
+
+namespace osm
+{
+class EditableFeature;
+}
 
 namespace search
 {
@@ -149,7 +155,7 @@ protected:
 
   void StopLocationFollow();
 
-  void CallDrapeFunction(TDrapeFunction const & fn);
+  void CallDrapeFunction(TDrapeFunction const & fn) const;
 
 public:
   Framework();
@@ -269,18 +275,21 @@ public:
   BookmarkAndCategory FindBookmark(UserMark const * mark) const;
   BookmarkManager & GetBookmarkManager() { return m_bmManager; }
 
-  void ActivateUserMark(UserMark const * mark, bool needAnim);
-  void DeactivateUserMark();
+private:
+  void ActivateMapSelection(bool needAnimation,
+                            df::SelectionShape::ESelectedObject selectionType,
+                            place_page::Info const & info) const;
+public:
+  void DeactivateMapSelection(bool notifyUI);
   bool HasActiveUserMark();
   void InvalidateUserMarks();
-  PoiMarkPoint * GetAddressMark(m2::PointD const & globalPoint) const;
-  // TODO(AlexZ): Temporary workaround to get last active UserMark on Android.
-  // Refactor it out together with UserMarks.
-  /// @returns nullptr if there is no selection on the map.
-  UserMark const * GetActiveUserMark() const;
 
-  using TActivateCallbackFn = function<void (unique_ptr<UserMarkCopy> mark)>;
-  void SetUserMarkActivationListener(TActivateCallbackFn const & fn) { m_activateUserMarkFn = fn; }
+  /// Called to notify UI that object on a map was selected (UI should show Place Page, for example).
+  using TActivateMapSelectionFn = function<void (place_page::Info const &)>;
+  /// Called to notify UI that object on a map was deselected (UI should hide Place Page).
+  using TDeactivateMapSelectionFn = function<void ()>;
+  void SetMapSelectionListeners(TActivateMapSelectionFn const & activator,
+                                TDeactivateMapSelectionFn const & deactivator);
 
   void ResetLastTapEvent();
 
@@ -290,8 +299,6 @@ public:
   void BlockTapEvents(bool block);
 
 private:
-  /// UI callback is called when tap event is "restored" after Drape engine restart.
-  void SimulateLastTapEventIfNeeded();
   unique_ptr<df::TapInfo> m_lastTapEvent;
 #ifdef OMIM_OS_ANDROID
   unique_ptr<location::CompassInfo> m_lastCompassInfo;
@@ -299,9 +306,12 @@ private:
 #endif
 
   void OnTapEvent(df::TapInfo const & tapInfo);
-  UserMark const * OnTapEventImpl(df::TapInfo const & tapInfo) const;
+  /// outInfo is valid only if return value is not df::SelectionShape::OBJECT_EMPTY.
+  df::SelectionShape::ESelectedObject OnTapEventImpl(df::TapInfo const & tapInfo,
+                                                     place_page::Info & outInfo) const;
 
-  TActivateCallbackFn m_activateUserMarkFn;
+  TActivateMapSelectionFn m_activateMapSelectionFn;
+  TDeactivateMapSelectionFn m_deactivateMapSelectionFn;
 
 public:
 
@@ -486,6 +496,15 @@ private:
   //void GetLocality(m2::PointD const & pt, search::AddressInfo & info) const;
   /// @returns true if command was handled by editor.
   bool ParseEditorDebugCommand(search::SearchParams const & params);
+
+  void FillBookmarkInfo(Bookmark const & bmk, BookmarkAndCategory const & bac, place_page::Info & info) const;
+  void FillFeatureInfo(FeatureID const & fid, place_page::Info & info) const;
+  void FillFeatureInfo(FeatureType & ft, place_page::Info & info) const;
+  /// @param customTitle, if not empty, overrides any other calculated name.
+  void FillPointInfo(m2::PointD const & mercator, string const & customTitle, place_page::Info & info) const;
+  void FillApiMarkInfo(ApiMarkPoint const & api, place_page::Info & info) const;
+  void FillMyPositionInfo(place_page::Info & info) const;
+
 public:
   /// @returns address of nearby building with house number in approx 1km distance.
   search::AddressInfo GetAddressInfoAtPoint(m2::PointD const & pt) const;
@@ -504,6 +523,8 @@ public:
   using TFeatureTypeFn = function<void(FeatureType &)>;
   void ForEachFeatureAtPoint(TFeatureTypeFn && fn, m2::PointD const & mercator) const;
   /// Set parse to false if you don't need all feature fields ready.
+  /// TODO(AlexZ): Refactor code which uses this method to get rid of it.
+  /// FeatureType instances shoud not be used outside ForEach* core methods.
   unique_ptr<FeatureType> GetFeatureByID(FeatureID const & fid, bool parse = true) const;
 
   void MemoryWarning();
@@ -529,7 +550,7 @@ public:
 
   /// @name Api
   //@{
-  string GenerateApiBackUrl(ApiMarkPoint const & point);
+  string GenerateApiBackUrl(ApiMarkPoint const & point) const;
   url_scheme::ParsedMapApi const & GetApiDataHolder() const { return m_ParsedMapApi; }
 
 private:
@@ -606,6 +627,17 @@ public:
   void Allow3dMode(bool allow3d, bool allow3dBuildings);
   void Save3dMode(bool allow3d, bool allow3dBuildings);
   void Load3dMode(bool & allow3d, bool & allow3dBuildings);
+
+public:
+  /// @name Editor interface.
+  //@{
+  /// Initializes createdFeature for Create Object UI.
+  void CreateFeatureAtViewportCenter(uint32_t const featureType, osm::EditableFeature & createdFeature) const;
+  /// @returns false if feature is invalid or can't be edited.
+  bool GetEditableFeature(FeatureID const & fid, osm::EditableFeature & ef) const;
+  void SaveEditedFeature(osm::EditableFeature const & ef) const;
+  void DeleteFeature(FeatureID const & fid) const;
+  //@}
 
 private:
   void SetRouterImpl(routing::RouterType type);

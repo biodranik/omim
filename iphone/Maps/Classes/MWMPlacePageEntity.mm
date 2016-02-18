@@ -2,8 +2,9 @@
 #import "MWMPlacePageViewManager.h"
 #import "MapViewController.h"
 
+#include "Framework.h"
+#include "indexer/editable_feature.hpp"
 #include "platform/measurement_utils.hpp"
-#include "indexer/osm_editor.hpp"
 
 using feature::Metadata;
 
@@ -102,30 +103,21 @@ void initFieldsMap()
 
 - (void)config
 {
-  UserMark const * mark = self.delegate.userMark;
-  _latlon = mark->GetLatLon();
-  using Type = UserMark::Type;
-  switch (mark->GetMarkType())
-  {
-    case Type::API:
-      [self configureForApi:static_cast<ApiMarkPoint const *>(mark)];
-      break;
-    case Type::DEBUG_MARK:
-      break;
-    case Type::MY_POSITION:
-      [self configureForMyPosition:static_cast<MyPositionMarkPoint const *>(mark)];
-      break;
-    case Type::SEARCH:
-      [self configureWithFeature:mark->GetFeature() andCustomName:nil];
-      break;
-    case Type::POI:
-      [self configureWithFeature:mark->GetFeature()
-                   andCustomName:@(static_cast<PoiMarkPoint const *>(mark)->GetCustomName().c_str())];
-      break;
-    case Type::BOOKMARK:
-      [self configureForBookmark:mark];
-      break;
-  }
+  auto const & info = self.delegate.info;
+  _latlon = info.GetLatLon();
+
+  if (info.IsFeature())
+    [self configureWithFeature:info];
+
+  if (info.IsMyPosition())
+    [self configureForMyPosition:info];
+
+  if (info.HasApiUrl())
+    [self configureForApi:info];
+
+  if (info.IsBookmark())
+    [self configureForBookmark:info];
+
   [self setEditableTypes];
 }
 
@@ -139,115 +131,105 @@ void initFieldsMap()
     m_values[cellType] = value;
 }
 
-- (void)configureForBookmark:(UserMark const *)bookmark
+- (void)configureForBookmark:(place_page::Info const &)info
 {
-  // TODO: There is need to get address info which store feature address.
-  Framework & f = GetFramework();
-  self.bac = f.FindBookmark(bookmark);
   self.type = MWMPlacePageEntityTypeBookmark;
-  BookmarkCategory * category = f.GetBmCategory(self.bac.first);
-  BookmarkData const & data = static_cast<Bookmark const *>(bookmark)->GetData();
+  // TODO(AlexZ): Do we really need to store a copy of bac in self?
+  self.bac = info.m_bac;
+  BookmarkCategory * cat = GetFramework().GetBmCategory(info.m_bac.first);
+  BookmarkData const & data = static_cast<Bookmark const *>(cat->GetUserMark(info.m_bac.second))->GetData();
 
   self.bookmarkTitle = @(data.GetName().c_str());
-  self.bookmarkCategory = @(category->GetName().c_str());
-  string const description = data.GetDescription();
+  self.bookmarkCategory = @(cat->GetName().c_str());
+  string const & description = data.GetDescription();
   self.bookmarkDescription = @(description.c_str());
   _isHTMLDescription = strings::IsHTML(description);
   self.bookmarkColor = @(data.GetType().c_str());
-
-  [self configureWithFeature:bookmark->GetFeature() andCustomName:nil];
 }
 
-- (void)configureForMyPosition:(MyPositionMarkPoint const *)myPositionMark
+- (void)configureForMyPosition:(place_page::Info const &)info
 {
-  // TODO: There is need to get address info which store feature address.
-  self.title = L(@"my_position");
+  // TODO: Refactor these configure* methods.
+//  self.title = @(info.GetTitle().c_str());//L(@"my_position");
   self.type = MWMPlacePageEntityTypeMyPosition;
 }
 
-- (void)configureForApi:(ApiMarkPoint const *)apiMark
+- (void)configureForApi:(place_page::Info const &)info
 {
-  // TODO: There is need to get address info which store feature address.
   self.type = MWMPlacePageEntityTypeAPI;
-  self.title = @(apiMark->GetName().c_str());
+//  self.title = @(info.GetTitle().c_str());
   self.category = @(GetFramework().GetApiDataHolder().GetAppTitle().c_str());
 }
 
-- (void)configureWithFeature:(FeatureType *)feature andCustomName:(NSString *)customName
+- (void)configureWithFeature:(place_page::Info const &)info
 {
-  NSString * emptyName = L(@"dropped_pin");
-  // Custom name is used in shared links and should override default feature's name in PP.
-  BOOL const customNameIsEmpty = customName.length == 0;
-  self.title = customNameIsEmpty ? emptyName : customName;
-  // feature can be nullptr if user selected any empty area.
-  if (feature)
+  search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(info.GetMercator());
+  self.title = @(info.GetTitle().c_str());
+  // TODO: Review subtitle logic. It's better to create it in info in C++.
+  NSMutableArray * subtitle = [[NSMutableArray alloc] init];
+  if (!info.GetSubtitle().empty())
+    [subtitle addObject:@(info.GetSubtitle().c_str())];
+  self.address = @(address.FormatAddress().c_str());
+
+  // TODO(AlexZ): Do we need this house logic?
+  if (!address.m_house.empty())
+    [self setMetaField:MWMPlacePageCellTypeBuilding value:address.m_house];
+
+  feature::Metadata const & md = info.GetMetadata();
+  for (auto const type : md.GetPresentTypes())
   {
-    search::AddressInfo const info = GetFramework().GetFeatureAddressInfo(*feature);
-    feature::Metadata const & metadata = feature->GetMetadata();
-    NSString * const name = @(info.GetPinName().c_str());
-    if (customNameIsEmpty)
-      self.title = name.length > 0 ? name : emptyName;
-    self.category = @(info.GetPinType().c_str());
-    self.address = @(info.FormatAddress().c_str());
-
-    if (!info.m_house.empty())
-      [self setMetaField:MWMPlacePageCellTypeBuilding value:info.m_house];
-
-    for (auto const type : metadata.GetPresentTypes())
+    switch (type)
     {
-      switch (type)
-      {
-        case Metadata::FMD_CUISINE:
-        {
-          [self deserializeCuisine:@(metadata.Get(type).c_str())];
-          NSString * cuisine = [self getCellValue:MWMPlacePageCellTypeCuisine];
-          if (self.category.length == 0)
-            self.category = cuisine;
-          else if (![self.category isEqualToString:cuisine])
-            self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, cuisine];
-          break;
-        }
-        case Metadata::FMD_ELE:
-        {
-          self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
-          if (self.type != MWMPlacePageEntityTypeBookmark)
-            self.type = MWMPlacePageEntityTypeEle;
-          break;
-        }
-        case Metadata::FMD_OPERATOR:
-        {
-          NSString * bank = @(metadata.Get(type).c_str());
-          if (self.category.length)
-            self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, bank];
-          else
-            self.category = bank;
-          break;
-        }
-        case Metadata::FMD_STARS:
-        {
-          self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
-          if (self.type != MWMPlacePageEntityTypeBookmark)
-            self.type = MWMPlacePageEntityTypeHotel;
-          break;
-        }
-        case Metadata::FMD_URL:
-        case Metadata::FMD_WEBSITE:
-        case Metadata::FMD_PHONE_NUMBER:
-        case Metadata::FMD_OPEN_HOURS:
-        case Metadata::FMD_EMAIL:
-        case Metadata::FMD_POSTCODE:
-          [self setMetaField:gMetaFieldsMap[type] value:metadata.Get(type)];
-          break;
-        case Metadata::FMD_INTERNET:
-          [self setMetaField:gMetaFieldsMap[type] value:L(@"WiFi_available").UTF8String];
-          break;
-        default:
-          break;
-      }
+//    case Metadata::FMD_CUISINE:
+//      {
+//        [self deserializeCuisine:@(md.Get(type).c_str())];
+//        NSString * cuisine = [self getCellValue:MWMPlacePageCellTypeCuisine];
+//        if (self.category.length == 0)
+//          self.category = cuisine;
+//        else if (![self.category isEqualToString:cuisine])
+//          self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, cuisine];
+//        break;
+//      }
+//      case Metadata::FMD_ELE:
+//      {
+//        self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
+//        if (self.type != MWMPlacePageEntityTypeBookmark)
+//          self.type = MWMPlacePageEntityTypeEle;
+//        break;
+//      }
+//      case Metadata::FMD_OPERATOR:
+//      {
+//        NSString * bank = @(metadata.Get(type).c_str());
+//        if (self.category.length)
+//          self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, bank];
+//        else
+//          self.category = bank;
+//        break;
+//      }
+//      case Metadata::FMD_STARS:
+//      {
+//        self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
+//        if (self.type != MWMPlacePageEntityTypeBookmark)
+//          self.type = MWMPlacePageEntityTypeHotel;
+//        break;
+//      }
+      case Metadata::FMD_URL:
+      case Metadata::FMD_WEBSITE:
+      case Metadata::FMD_PHONE_NUMBER:
+      case Metadata::FMD_OPEN_HOURS:
+      case Metadata::FMD_EMAIL:
+      case Metadata::FMD_POSTCODE:
+        [self setMetaField:gMetaFieldsMap[type] value:md.Get(type)];
+        break;
+      case Metadata::FMD_INTERNET:
+        [self setMetaField:gMetaFieldsMap[type] value:L(@"WiFi_available").UTF8String];
+        break;
+      default:
+        break;
     }
-
-    [self processStreets];
   }
+
+  [self processStreets];
 }
 
 - (void)toggleCoordinateSystem
@@ -264,18 +246,14 @@ void initFieldsMap()
 
 - (void)processStreets
 {
-  FeatureType * feature = self.delegate.userMark->GetFeature();
-  if (!feature)
-    return;
-
   Framework & frm = GetFramework();
-  auto const streets = frm.GetNearbyFeatureStreets(*feature);
+  auto const streets = frm.GetNearbyFeatureStreets(self.delegate.info.m_featureID);
   NSMutableArray * arr = [[NSMutableArray alloc] initWithCapacity:streets.size()];
   for (auto const & street : streets)
     [arr addObject:@(street.c_str())];
   self.nearbyStreets = arr;
 
-  auto const info = frm.GetFeatureAddressInfo(*feature);
+  auto const info = frm.GetFeatureAddressInfo(self.delegate.info.m_featureID);
   [self setMetaField:MWMPlacePageCellTypeStreet value:info.m_street];
 }
 
@@ -283,10 +261,8 @@ void initFieldsMap()
 
 - (void)setEditableTypes
 {
-  FeatureType * feature = self.delegate.userMark->GetFeature();
-  if (!feature)
-    return;
-
+  // TODO(AlexZ): Refactor editor interface to accept FeatureID.
+  auto const feature = GetFramework().GetFeatureByID(self.delegate.info.m_featureID);
   osm::EditableProperties const editable = osm::Editor::Instance().GetEditableProperties(*feature);
   self.canEditObject = editable.IsEditable();
   if (editable.m_name)
@@ -311,63 +287,67 @@ void initFieldsMap()
 
 - (void)saveEditedCells:(MWMPlacePageCellTypeValueMap const &)cells
 {
-  FeatureType * feature = self.delegate.userMark->GetFeature();
-  NSAssert(feature != nullptr, @"Feature is null");
-  if (!feature)
-    return;
-
-  auto & metadata = feature->GetMetadata();
-  NSString * entityStreet = [self getCellValue:MWMPlacePageCellTypeStreet];
-  string streetName = (entityStreet ? entityStreet : @"").UTF8String;
-  NSString * entityHouseNumber = [self getCellValue:MWMPlacePageCellTypeBuilding];
-  string houseNumber = (entityHouseNumber ? entityHouseNumber : @"").UTF8String;;
-  for (auto const & cell : cells)
-  {
-    switch (cell.first)
-    {
-      case MWMPlacePageCellTypePhoneNumber:
-      case MWMPlacePageCellTypeWebsite:
-      case MWMPlacePageCellTypeOpenHours:
-      case MWMPlacePageCellTypeEmail:
-      case MWMPlacePageCellTypeWiFi:
-      {
-        Metadata::EType const fmdType = static_cast<Metadata::EType>(gMetaFieldsMap[cell.first]);
-        NSAssert(fmdType > 0 && fmdType < Metadata::FMD_COUNT, @"Incorrect enum value");
-        metadata.Set(fmdType, cell.second);
-        break;
-      }
-      case MWMPlacePageCellTypeCuisine:
-      {
-        Metadata::EType const fmdType = static_cast<Metadata::EType>(gMetaFieldsMap[cell.first]);
-        NSAssert(fmdType > 0 && fmdType < Metadata::FMD_COUNT, @"Incorrect enum value");
-        NSString * osmCuisineStr = makeOSMCuisineString(self.cuisines);
-        metadata.Set(fmdType, osmCuisineStr.UTF8String);
-        break;
-      }
-      case MWMPlacePageCellTypeName:
-      {
-        // TODO(AlexZ): Make sure that we display and save name in the same language (default?).
-        auto names = feature->GetNames();
-        names.AddString(StringUtf8Multilang::kDefaultCode, cell.second);
-        feature->SetNames(names);
-        break;
-      }
-      case MWMPlacePageCellTypeStreet:
-      {
-        streetName = cell.second;
-        break;
-      }
-      case MWMPlacePageCellTypeBuilding:
-      {
-        houseNumber = cell.second;
-        break;
-      }
-      default:
-        NSAssert(false, @"Invalid field for editor");
-        break;
-    }
-  }
-  osm::Editor::Instance().EditFeature(*feature, streetName, houseNumber);
+  // TODO(Vlad): Before editing starts, we should get editable feature first using code below:
+  // osm::EditableFeature ef;
+  // GetFramework().GetEditableFeature(self.delegate.info.m_featureID, ef);
+  //
+  // TODO(Vlad): After that, ef structure should be filled by information from user.
+  //
+  // TODO(Vlad): When editing finishes, this code should be called:
+  // GetFramework().SaveEditedFeature(ef);
+  
+//  auto & metadata = feature->GetMetadata();
+//  NSString * entityStreet = [self getCellValue:MWMPlacePageCellTypeStreet];
+//  string streetName = (entityStreet ? entityStreet : @"").UTF8String;
+//  NSString * entityHouseNumber = [self getCellValue:MWMPlacePageCellTypeBuilding];
+//  string houseNumber = (entityHouseNumber ? entityHouseNumber : @"").UTF8String;;
+//  for (auto const & cell : cells)
+//  {
+//    switch (cell.first)
+//    {
+//      case MWMPlacePageCellTypePhoneNumber:
+//      case MWMPlacePageCellTypeWebsite:
+//      case MWMPlacePageCellTypeOpenHours:
+//      case MWMPlacePageCellTypeEmail:
+//      case MWMPlacePageCellTypeWiFi:
+//      {
+//        Metadata::EType const fmdType = static_cast<Metadata::EType>(gMetaFieldsMap[cell.first]);
+//        NSAssert(fmdType > 0 && fmdType < Metadata::FMD_COUNT, @"Incorrect enum value");
+//        metadata.Set(fmdType, cell.second);
+//        break;
+//      }
+//      case MWMPlacePageCellTypeCuisine:
+//      {
+//        Metadata::EType const fmdType = static_cast<Metadata::EType>(gMetaFieldsMap[cell.first]);
+//        NSAssert(fmdType > 0 && fmdType < Metadata::FMD_COUNT, @"Incorrect enum value");
+//        NSString * osmCuisineStr = makeOSMCuisineString(self.cuisines);
+//        metadata.Set(fmdType, osmCuisineStr.UTF8String);
+//        break;
+//      }
+//      case MWMPlacePageCellTypeName:
+//      {
+//        // TODO(AlexZ): Make sure that we display and save name in the same language (default?).
+//        auto names = feature->GetNames();
+//        names.AddString(StringUtf8Multilang::kDefaultCode, cell.second);
+//        feature->SetNames(names);
+//        break;
+//      }
+//      case MWMPlacePageCellTypeStreet:
+//      {
+//        streetName = cell.second;
+//        break;
+//      }
+//      case MWMPlacePageCellTypeBuilding:
+//      {
+//        houseNumber = cell.second;
+//        break;
+//      }
+//      default:
+//        NSAssert(false, @"Invalid field for editor");
+//        break;
+//    }
+//  }
+//  osm::Editor::Instance().EditFeature(*feature, streetName, houseNumber);
 }
 
 #pragma mark - Getters

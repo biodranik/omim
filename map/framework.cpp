@@ -31,6 +31,7 @@
 #include "indexer/categories_holder.hpp"
 #include "indexer/classificator_loader.hpp"
 #include "indexer/drawing_rules.hpp"
+#include "indexer/editable_feature.hpp"
 #include "indexer/feature.hpp"
 #include "indexer/map_style_reader.hpp"
 #include "indexer/osm_editor.hpp"
@@ -226,7 +227,7 @@ void Framework::OnUserPositionChanged(m2::PointD const & position)
     m_routingSession.SetUserCurrentPosition(position);
 }
 
-void Framework::CallDrapeFunction(TDrapeFunction const & fn)
+void Framework::CallDrapeFunction(TDrapeFunction const & fn) const
 {
   if (m_drapeEngine)
     fn(m_drapeEngine.get());
@@ -620,11 +621,116 @@ bool Framework::DeleteBmCategory(size_t index)
   return m_bmManager.DeleteBmCategory(index);
 }
 
+void Framework::FillBookmarkInfo(Bookmark const & bmk, BookmarkAndCategory const & bac, place_page::Info & info) const
+{
+  FillPointInfo(bmk.GetPivot(), string(), info);
+  info.m_bac = bac;
+}
+
+void Framework::FillFeatureInfo(FeatureID const & fid, place_page::Info & info) const
+{
+  if (!fid.IsValid())
+  {
+    LOG(LERROR, ("FeatureID is invalid:", fid));
+    return;
+  }
+
+  Index::FeaturesLoaderGuard const guard(m_model.GetIndex(), fid.m_mwmId);
+  FeatureType ft;
+  guard.GetFeatureByIndex(fid.m_index, ft);
+  FillFeatureInfo(ft, info);
+}
+
+void Framework::FillFeatureInfo(FeatureType & ft, place_page::Info & info) const
+{
+  info.m_featureID = ft.GetID();
+  ASSERT(info.m_featureID.IsValid(), ());
+
+  info.m_mercator = feature::GetCenter(ft);
+  info.m_types = feature::TypesHolder(ft);
+  info.m_metadata = ft.GetMetadata();
+
+  // Place page title.
+  string intName;
+  ft.GetPreferredNames(info.m_title, intName);
+  if (!intName.empty())
+    info.m_title += " (" + intName + ")";
+
+  // Place page subtitle (types, cuisines etc.).
+  constexpr char const * kSubtitleSeparator = " • ";
+  vector<string> values;
+  // TODO(AlexZ): Should we display more than one type?
+  values.push_back(GetPrintableFeatureTypes(ft).front());
+  using feature::Metadata;
+
+  Metadata const & md = ft.GetMetadata();
+  if (md.Has(Metadata::FMD_CUISINE))
+    strings::Tokenize(md.Get(Metadata::FMD_CUISINE), ";", [&values](string const & v){ values.push_back(v); });
+
+  if (md.Has(Metadata::FMD_STARS))
+  {
+    int stars;
+    if (strings::to_int(md.Get(Metadata::FMD_STARS), stars))
+    {
+      string str;
+      for (int i = 0; i < stars; ++i)
+        str += "★";
+      for (int i = stars; i < (stars > 5 ? 7 : 5); ++i)
+        str += "☆";
+      values.push_back(str);
+    }
+  }
+
+  if (md.Has(Metadata::FMD_OPERATOR))
+    values.push_back(md.Get(Metadata::FMD_OPERATOR));
+
+  if (md.Has(Metadata::FMD_ELE))
+  {
+    double elevationInMeters;
+    if (strings::to_double(md.Get(Metadata::FMD_ELE), elevationInMeters))
+      values.push_back("⛰" + MeasurementUtils::FormatAltitude(elevationInMeters));
+  }
+  // TODO(AlexZ): Support no internet, wired only internet, paid access etc.
+  if (ft.HasInternet())
+    values.push_back(m_stringsBundle.GetString("wifi"));
+
+  info.m_subtitle = strings::JoinStrings(values, kSubtitleSeparator);
+
+  info.m_isEditable = osm::Editor::Instance().GetEditableProperties(ft).IsEditable();
+}
+
+void Framework::FillPointInfo(m2::PointD const & mercator, string const & customTitle, place_page::Info & info) const
+{
+  info.m_mercator = mercator;
+  auto feature = GetFeatureAtPoint(mercator);
+  if (feature)
+    FillFeatureInfo(*feature, info);
+  else
+    info.m_title = m_stringsBundle.GetString("dropped_pin");
+
+  if (!customTitle.empty())
+    info.m_title = customTitle;
+}
+
+void Framework::FillApiMarkInfo(ApiMarkPoint const & api, place_page::Info & info) const
+{
+  FillPointInfo(api.GetPivot(), api.GetName(), info);
+  info.m_apiUrl = GenerateApiBackUrl(api);
+}
+
+void Framework::FillMyPositionInfo(place_page::Info & info) const
+{
+  double lat, lon;
+  VERIFY(GetCurrentPosition(lat, lon), ());
+  info.m_mercator = MercatorBounds::FromLatLon(lat, lon);
+  info.m_isMyPosition = true;
+  info.m_title = m_stringsBundle.GetString("my_position");
+}
+
 void Framework::ShowBookmark(BookmarkAndCategory const & bnc)
 {
   StopLocationFollow();
 
-  // show ballon above
   Bookmark const * mark = static_cast<Bookmark const *>(GetBmCategory(bnc.first)->GetUserMark(bnc.second));
 
   double scale = mark->GetScale();
@@ -632,7 +738,10 @@ void Framework::ShowBookmark(BookmarkAndCategory const & bnc)
     scale = scales::GetUpperComfortScale();
 
   CallDrapeFunction(bind(&df::DrapeEngine::SetModelViewCenter, _1, mark->GetPivot(), scale, true));
-  ActivateUserMark(mark, true);
+
+  place_page::Info info;
+  FillBookmarkInfo(*mark, bnc, info);
+  ActivateMapSelection(true, df::SelectionShape::OBJECT_USER_MARK, info);
 }
 
 void Framework::ShowTrack(Track const & track)
@@ -1182,57 +1291,46 @@ void Framework::LoadSearchResultMetadata(search::Result & res) const
 void Framework::ShowSearchResult(search::Result const & res)
 {
   CancelInteractiveSearch();
+  StopLocationFollow();
 
-  UserMarkControllerGuard guard(m_bmManager, UserMarkType::SEARCH_MARK);
-  guard.m_controller.SetIsDrawable(false);
-  guard.m_controller.Clear();
-  guard.m_controller.SetIsVisible(true);
-
-  int scale;
-  m2::PointD center;
-  unique_ptr<FeatureType> ft;
-
+  alohalytics::LogEvent("searchShowResult", {{"pos", strings::to_string(res.GetPositionInResults())},
+                                             {"result", res.ToStringForStats()}});
+  place_page::Info info;
   using namespace search;
-  using namespace feature;
-
-  alohalytics::TStringMap const stats = {{"pos", strings::to_string(res.GetPositionInResults())},
-                                         {"result", res.ToStringForStats()}};
-  alohalytics::LogEvent("searchShowResult", stats);
-
+  int scale;
   switch (res.GetResultType())
   {
     case Result::RESULT_FEATURE:
-    {
-      ft = GetFeatureByID(res.GetFeatureID());
-      scale = GetFeatureViewportScale(TypesHolder(*ft));
-      center = GetCenter(*ft, scale);
+      FillFeatureInfo(res.GetFeatureID(), info);
+      scale = GetFeatureViewportScale(info.GetTypes());
       break;
-    }
 
     case Result::RESULT_LATLON:
     case Result::RESULT_ADDRESS:
+      FillPointInfo(res.GetFeatureCenter(), res.GetString(), info);
       scale = scales::GetUpperComfortScale();
-      center = res.GetFeatureCenter();
       break;
 
-    default:
+    case Result::RESULT_SUGGEST_PURE:
+    case Result::RESULT_SUGGEST_FROM_FEATURE:
       ASSERT(false, ("Suggests should not be here."));
       return;
   }
 
-  StopLocationFollow();
+  m2::PointD const center = info.GetMercator();
   if (m_currentModelView.isPerspective())
     CallDrapeFunction(bind(&df::DrapeEngine::SetModelViewCenter, _1, center, scale, true));
   else
     ShowRect(df::GetRectForDrawScale(scale, center));
 
-  UserMark * mark = guard.m_controller.CreateUserMark(center);
-  if (ft)
-    mark->SetFeature(move(ft));
-  else
-    mark->SetFeature(GetFeatureAtPoint(center));
-
-  ActivateUserMark(mark, false);
+  {
+    UserMarkControllerGuard guard(m_bmManager, UserMarkType::SEARCH_MARK);
+    guard.m_controller.SetIsDrawable(false);
+    guard.m_controller.Clear();
+    guard.m_controller.SetIsVisible(true);
+    UNUSED_VALUE(guard.m_controller.CreateUserMark(center));
+  }
+  ActivateMapSelection(false, df::SelectionShape::OBJECT_USER_MARK, info);
 }
 
 size_t Framework::ShowSearchResults(search::Results const & results)
@@ -1349,16 +1447,9 @@ void Framework::FillSearchResultsMarks(search::Results const & results)
   size_t const count = results.GetCount();
   for (size_t i = 0; i < count; ++i)
   {
-    using namespace search;
-
-    Result const & r = results.GetResult(i);
+    search::Result const & r = results.GetResult(i);
     if (r.HasPoint())
-    {
-      UserMark * mark = guard.m_controller.CreateUserMark(r.GetFeatureCenter());
-      // Store feature from the search result.
-      // TODO(AlexZ): Refactor all usermarks code.
-      mark->SetFeature(GetFeatureByID(r.GetFeatureID()));
-    }
+      UNUSED_VALUE(guard.m_controller.CreateUserMark(r.GetFeatureCenter()));
   }
 }
 
@@ -1510,16 +1601,10 @@ void Framework::CreateDrapeEngine(ref_ptr<dp::OGLContextFactory> contextFactory,
   LoadViewport();
 
   // In case of the engine reinitialization simulate the last tap to show selection mark.
-  SimulateLastTapEventIfNeeded();
-}
-
-void Framework::SimulateLastTapEventIfNeeded()
-{
   if (m_lastTapEvent)
   {
-    UserMark const * mark = OnTapEventImpl(*m_lastTapEvent);
-    if (mark)
-      ActivateUserMark(mark, true);
+    place_page::Info info;
+    ActivateMapSelection(false, OnTapEventImpl(*m_lastTapEvent, info), info);
   }
 }
 
@@ -1705,8 +1790,8 @@ bool Framework::ShowMapForURL(string const & url)
 
   if (result != FAILED)
   {
-    // always hide current balloon here
-    DeactivateUserMark();
+    // Always hide current map selection.
+    DeactivateMapSelection(true);
 
     // set viewport and stop follow mode if any
     StopLocationFollow();
@@ -1714,19 +1799,17 @@ bool Framework::ShowMapForURL(string const & url)
 
     if (result != NO_NEED_CLICK)
     {
+      place_page::Info info;
       if (apiMark)
       {
-        LOG(LINFO, ("Show API mark:", static_cast<ApiMarkPoint const *>(apiMark)->GetName()));
-
-        ActivateUserMark(apiMark, false);
+        FillApiMarkInfo(*apiMark, info);
+        ActivateMapSelection(false, df::SelectionShape::OBJECT_USER_MARK, info);
       }
       else
       {
-        PoiMarkPoint * mark = UserMarkContainer::UserMarkForPoi();
-        mark->SetPtOrg(point);
-        // TODO(AlexZ): refactor out interface for passing PP values to UI.
-        mark->SetCustomName(name);
-        ActivateUserMark(mark, false);
+        UserMarkContainer::UserMarkForPoi()->SetPtOrg(point);
+        FillPointInfo(point, name, info);
+        ActivateMapSelection(false, df::SelectionShape::OBJECT_POI, info);
       }
     }
 
@@ -1811,6 +1894,25 @@ unique_ptr<FeatureType> Framework::GetFeatureByID(FeatureID const & fid, bool pa
   return feature;
 }
 
+//place_page::Info Framework::GetInfoByID(FeatureID const & fid) const
+//{
+//  place_page::Info info;
+//  if (!fid.IsValid())
+//    return info;
+
+//  // Note: all parse methods should be called with guard alive.
+//  Index::FeaturesLoaderGuard guard(m_model.GetIndex(), fid.m_mwmId);
+//  FeatureType ft;
+//  guard.GetFeatureByIndex(fid.m_index, ft);
+
+//  return MakeInfoFromFeature(ft);
+//}
+
+//place_page::Info Framework::GetInfoAtPoint(m2::PointD const & mercator) const
+//{
+
+//}
+
 BookmarkAndCategory Framework::FindBookmark(UserMark const * mark) const
 {
   BookmarkAndCategory empty = MakeEmptyBookmarkAndCategory();
@@ -1839,42 +1941,35 @@ BookmarkAndCategory Framework::FindBookmark(UserMark const * mark) const
   return result;
 }
 
-PoiMarkPoint * Framework::GetAddressMark(m2::PointD const & globalPoint) const
+void Framework::SetMapSelectionListeners(TActivateMapSelectionFn const & activator,
+                                         TDeactivateMapSelectionFn const & deactivator)
 {
-  PoiMarkPoint * mark = UserMarkContainer::UserMarkForPoi();
-  mark->SetPtOrg(globalPoint);
-  mark->SetFeature(GetFeatureAtPoint(globalPoint));
-  return mark;
+  m_activateMapSelectionFn = activator;
+  m_deactivateMapSelectionFn = deactivator;
 }
 
-void Framework::ActivateUserMark(UserMark const * mark, bool needAnim)
+void Framework::ActivateMapSelection(bool needAnimation, df::SelectionShape::ESelectedObject selectionType,
+                                     place_page::Info const & info) const
 {
-  if (!m_activateUserMarkFn)
-      return;
+  ASSERT_NOT_EQUAL(selectionType, df::SelectionShape::OBJECT_EMPTY, ("Empty selections are impossible."));
+  CallDrapeFunction(bind(&df::DrapeEngine::SelectObject, _1, selectionType, info.GetMercator(), needAnimation));
 
-  if (mark)
-  {
-    m_activateUserMarkFn(mark->Copy());
-    df::SelectionShape::ESelectedObject object = df::SelectionShape::OBJECT_USER_MARK;
-    UserMark::Type type = mark->GetMarkType();
-    if (type == UserMark::Type::MY_POSITION)
-      object = df::SelectionShape::OBJECT_MY_POSITION;
-    else if (type == UserMark::Type::POI)
-      object = df::SelectionShape::OBJECT_POI;
-
-    CallDrapeFunction(bind(&df::DrapeEngine::SelectObject, _1, object, mark->GetPivot(), needAnim));
-  }
+  if (m_activateMapSelectionFn)
+    m_activateMapSelectionFn(info);
   else
-  {
-    m_activateUserMarkFn(nullptr);
-    CallDrapeFunction(bind(&df::DrapeEngine::DeselectObject, _1));
-  }
+    LOG(LWARNING, ("m_activateMapSelectionFn has not been set up."));
 }
 
-void Framework::DeactivateUserMark()
+void Framework::DeactivateMapSelection(bool notifyUI)
 {
+  bool const somethingWasAlreadySelected = (m_lastTapEvent != nullptr);
   m_lastTapEvent.reset();
-  CallDrapeFunction(bind(&df::DrapeEngine::DeselectObject, _1));
+
+  if (notifyUI && somethingWasAlreadySelected && m_deactivateMapSelectionFn)
+    m_deactivateMapSelectionFn();
+
+  if (somethingWasAlreadySelected)
+    CallDrapeFunction(bind(&df::DrapeEngine::DeselectObject, _1));
 }
 
 bool Framework::HasActiveUserMark()
@@ -1883,13 +1978,6 @@ bool Framework::HasActiveUserMark()
     return false;
 
   return m_drapeEngine->GetSelectedObject() != df::SelectionShape::OBJECT_EMPTY;
-}
-
-UserMark const * Framework::GetActiveUserMark() const
-{
-  if (m_lastTapEvent)
-    return OnTapEventImpl(*m_lastTapEvent);
-  return nullptr;
 }
 
 void Framework::InvalidateUserMarks()
@@ -1906,33 +1994,62 @@ void Framework::InvalidateUserMarks()
 
 void Framework::OnTapEvent(df::TapInfo const & tapInfo)
 {
-  // Back up last tap event to recover selection in case of Drape reinitialization.
-  m_lastTapEvent.reset(new df::TapInfo(tapInfo));
+  bool const somethingWasAlreadySelected = (m_lastTapEvent != nullptr);
 
-  UserMark const * mark = OnTapEventImpl(tapInfo);
-
+  place_page::Info info;
+  df::SelectionShape::ESelectedObject const selection = OnTapEventImpl(tapInfo, info);
+  if (selection != df::SelectionShape::OBJECT_EMPTY)
   {
-    alohalytics::TStringMap details {{"isLongPress", tapInfo.m_isLong ? "1" : "0"}};
-    if (mark)
-      mark->FillLogEvent(details);
-    alohalytics::Stats::Instance().LogEvent("$GetUserMark", details);
-  }
+    // Back up last tap event to recover selection in case of Drape reinitialization.
+    m_lastTapEvent.reset(new df::TapInfo(tapInfo));
 
-  ActivateUserMark(mark, true);
+    {
+      ms::LatLon const ll = info.GetLatLon();
+      double myLat, myLon;
+      double metersToTap = -1;
+      if (info.IsMyPosition())
+        metersToTap = 0;
+      else if (GetCurrentPosition(myLat, myLon))
+        metersToTap = ms::DistanceOnEarth(myLat, myLon, ll.lat, ll.lon);
+
+      alohalytics::TStringMap kv = {{"longTap", tapInfo.m_isLong ? "1" : "0"},
+                                    {"title", info.GetTitle()},
+                                    {"bookmark", info.IsBookmark() ? "1" : "0"},
+                                    {"meters", strings::to_string_dac(metersToTap, 0)}};
+      if (info.IsFeature())
+      {
+        kv["types"] = DebugPrint(info.GetTypes());
+        kv["metadata"] = info.GetMetadata().Empty() ? "0" : "1";
+      }
+      // Older version of statistics used "$GetUserMark" event.
+      alohalytics::Stats::Instance().LogEvent("$SelectMapObject", kv, alohalytics::Location::FromLatLon(ll.lat, ll.lon));
+    }
+
+    ActivateMapSelection(true, selection, info);
+  }
+  else if (somethingWasAlreadySelected)
+  {
+    alohalytics::Stats::Instance().LogEvent("$DelectMapObject");
+    DeactivateMapSelection(true);
+  }
 }
 
 void Framework::InvalidateRendering()
 {
-  if (m_drapeEngine != nullptr)
+  if (m_drapeEngine)
     m_drapeEngine->Invalidate();
 }
 
-UserMark const * Framework::OnTapEventImpl(const df::TapInfo & tapInfo) const
+df::SelectionShape::ESelectedObject Framework::OnTapEventImpl(df::TapInfo const & tapInfo,
+                                                              place_page::Info & outInfo) const
 {
   m2::PointD const pxPoint2d = m_currentModelView.P3dtoP(tapInfo.m_pixelPoint);
 
   if (tapInfo.m_isMyPositionTapped)
-    return UserMarkContainer::UserMarkForMyPostion();
+  {
+    FillMyPositionInfo(outInfo);
+    return df::SelectionShape::OBJECT_MY_POSITION;
+  }
 
   df::VisualParams const & vp = df::VisualParams::Instance();
 
@@ -1953,47 +2070,45 @@ UserMark const * Framework::OnTapEventImpl(const df::TapInfo & tapInfo) const
         });
 
   FeatureID const & fid = tapInfo.m_featureTapped;
-  if (mark != nullptr)
+  if (mark)
   {
-    // TODO(AlexZ): Refactor out together with UserMarks.
-    // Do not reset feature if it's already there (e.g. from Search results).
-    if (nullptr == mark->GetFeature())
+    switch (mark->GetMarkType())
     {
-      const_cast<UserMark *>(mark)->SetFeature(fid.IsValid() ?
-                                               GetFeatureByID(fid) :
-                                               GetFeatureAtPoint(mark->GetPivot()));
+    case UserMark::Type::API:
+      FillApiMarkInfo(*static_cast<ApiMarkPoint const *>(mark), outInfo);
+      break;
+    case UserMark::Type::BOOKMARK:
+      FillBookmarkInfo(*static_cast<Bookmark const *>(mark), FindBookmark(mark), outInfo);
+      break;
+    case UserMark::Type::SEARCH:
+      // TODO(AlexZ): Check if search results features are correcly passed to UI.
+      FillApiMarkInfo(*static_cast<ApiMarkPoint const *>(mark), outInfo);
+      break;
+    default:
+      ASSERT(false, ("FindNearestUserMark returned invalid mark."));
     }
-    return mark;
+    return df::SelectionShape::OBJECT_USER_MARK;
   }
 
-  bool needMark = false;
-  m2::PointD mercatorPivot;
-  unique_ptr<FeatureType> feature;
-
+  bool showMapSelection = false;
   if (fid.IsValid())
   {
-    feature = GetFeatureByID(fid);
-    mercatorPivot = feature::GetCenter(*feature);
-    needMark = true;
+    FillFeatureInfo(fid, outInfo);
+    showMapSelection = true;
   }
   else if (tapInfo.m_isLong)
   {
-    mercatorPivot = m_currentModelView.PtoG(pxPoint2d);
-    // TODO(AlexZ): Should we change mercatorPivot to found feature's center?
-    feature = GetFeatureAtPoint(mercatorPivot);
-    needMark = true;
+    FillPointInfo(m_currentModelView.PtoG(pxPoint2d), "", outInfo);
+    showMapSelection = true;
   }
 
-  if (needMark)
+  if (showMapSelection)
   {
-    PoiMarkPoint * poiMark = UserMarkContainer::UserMarkForPoi();
-    poiMark->SetPtOrg(mercatorPivot);
-    // Set or reset feature.
-    poiMark->SetFeature(move(feature));
-    return poiMark;
+    UserMarkContainer::UserMarkForPoi()->SetPtOrg(outInfo.GetMercator());
+    return df::SelectionShape::OBJECT_POI;
   }
 
-  return nullptr;
+  return df::SelectionShape::OBJECT_EMPTY;
 }
 
 void Framework::PredictLocation(double & lat, double & lon, double accuracy,
@@ -2033,7 +2148,7 @@ string Framework::CodeGe0url(double lat, double lon, double zoomLevel, string co
   return res;
 }
 
-string Framework::GenerateApiBackUrl(ApiMarkPoint const & point)
+string Framework::GenerateApiBackUrl(ApiMarkPoint const & point) const
 {
   string res = m_ParsedMapApi.GetGlobalBackUrl();
   if (!res.empty())
@@ -2426,4 +2541,62 @@ bool Framework::ParseEditorDebugCommand(search::SearchParams const & params)
     return true;
   }
   return false;
+}
+
+void Framework::CreateFeatureAtViewportCenter(uint32_t const featureType, osm::EditableFeature & createdFeature) const
+{
+  // TODO(AlexZ): Finish this impl.
+  createdFeature.SetMercator(GetViewportCenter());
+  createdFeature.SetName({});
+  feature::TypesHolder types(feature::EGeomType::GEOM_POINT);
+  types.Assign(featureType);
+  createdFeature.SetTypes(types);
+  FeatureID const fid;//TODO = osm::Editor::CreatePOI(featureType);
+  createdFeature.SetFeatureID(fid);
+  createdFeature.SetMetadata({});
+  //createdFeature.m_editableProperties =
+  createdFeature.SetHouseNumber({});
+  createdFeature.SetStreet({});
+  //createdFeature.m_nearbyStreets = ;
+}
+
+bool Framework::GetEditableFeature(FeatureID const & fid, osm::EditableFeature & ef) const
+{
+  if (!fid.IsValid())
+    return false;
+  // TODO(AlexZ): Move this code to the Editor.
+  auto feature = GetFeatureByID(fid);
+  FeatureType & ft = *feature;
+  ef.SetMercator(feature::GetCenter(ft));
+  ef.SetName(ft.GetNames());
+  ef.SetTypes(feature::TypesHolder(ft));
+  ef.SetMetadata(ft.GetMetadata());
+  ef.SetFeatureID(fid);
+  ef.SetHouseNumber(ft.GetHouseNumber());
+  ef.SetStreet(GetFeatureAddressInfo(ft).m_street);
+  ef.SetNearbyStreets(GetNearbyFeatureStreets(ft));
+  ef.SetEditableProperties(osm::Editor::Instance().GetEditableProperties(ft));
+  return true;
+}
+
+void Framework::SaveEditedFeature(osm::EditableFeature const & ef) const
+{
+  // TODO(AlexZ): Move this code to the Editor.
+  auto feature = GetFeatureByID(ef.GetFeatureID());
+  FeatureType & ft = *feature;
+  ft.ApplyPatch(ef);
+  osm::Editor::Instance().EditFeature(ft, ef.GetStreet(), ef.GetHouseNumber());
+
+  // Show updated place page in UI.
+  // TODO(Vlad): Do we need to deactivate it first?
+  //DeactivateMapSelection(true);
+  ASSERT(m_lastTapEvent, ());
+  place_page::Info info;
+  ActivateMapSelection(false, OnTapEventImpl(*m_lastTapEvent, info), info);
+}
+
+void Framework::DeleteFeature(FeatureID const & fid) const
+{
+  // TODO(AlexZ): Use FeatureID in the editor interface.
+  osm::Editor::Instance().DeleteFeature(*GetFeatureByID(fid));
 }

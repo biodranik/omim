@@ -19,6 +19,7 @@
 #import "3party/Alohalytics/src/alohalytics_objc.h"
 
 #include "geometry/distance_on_sphere.hpp"
+#include "map/place_page_info.hpp"
 #include "platform/measurement_utils.hpp"
 
 extern NSString * const kAlohalyticsTapEventKey;
@@ -32,7 +33,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 @interface MWMPlacePageViewManager () <LocationObserver, MWMPlacePageEntityProtocol>
 {
-  unique_ptr<UserMarkCopy> m_userMark;
+  place_page::Info m_info;
 }
 
 @property (weak, nonatomic) UIViewController * ownerViewController;
@@ -67,29 +68,31 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (void)dismissPlacePage
 {
-  if (!m_userMark)
-    return;
+// TODO(AlexZ): which code used this check? Do we need it?
+//  if (!m_userMark)
+//    return;
   [self.delegate placePageDidClose];
   self.state = MWMPlacePageManagerStateClosed;
   [self.placePage dismiss];
   [[MapsAppDelegate theApp].m_locationManager stop:self];
-  m_userMark = nullptr;
-  GetFramework().DeactivateUserMark();
+  m_info = {};
+  // TODO(AlexZ): What if we call it with true?
+  GetFramework().DeactivateMapSelection(false);
   self.placePage = nil;
 }
 
-- (void)showPlacePageWithUserMark:(unique_ptr<UserMarkCopy>)userMark
+- (void)showPlacePage:(place_page::Info const &)info
 {
-  NSAssert(userMark, @"userMark can not be nil.");
-  m_userMark = move(userMark);
+  m_info = info;
   [[MapsAppDelegate theApp].m_locationManager start:self];
   [self reloadPlacePage];
 }
 
 - (void)reloadPlacePage
 {
-  if (!m_userMark)
-    return;
+  // TODO(AlexZ): Do we need this check?
+//  if (!m_userMark)
+//    return;
   self.entity = [[MWMPlacePageEntity alloc] initWithDelegate:self];
   self.state = MWMPlacePageManagerStateOpen;
   if (IPAD)
@@ -101,9 +104,9 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 #pragma mark - MWMPlacePageEntityProtocol
 
-- (UserMark const *)userMark
+- (place_page::Info const &)info
 {
-  return m_userMark->GetUserMark();
+  return m_info;
 }
 
 #pragma mark - Layout
@@ -219,14 +222,13 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatBuildRoute)
                    withParameters:@{kStatValue : kStatDestination}];
   [Alohalytics logEvent:kAlohalyticsTapEventKey withValue:@"ppRoute"];
-  m2::PointD const & destination = m_userMark->GetUserMark()->GetPivot();
   m2::PointD const myPosition([MapsAppDelegate theApp].m_locationManager.lastLocation.mercator);
   using namespace location;
   EMyPositionMode mode = self.myPositionMode;
   [self.delegate buildRouteFrom:mode != EMyPositionMode::MODE_UNKNOWN_POSITION && mode != EMyPositionMode::MODE_PENDING_POSITION ?
                                                      MWMRoutePoint(myPosition) :
                                               MWMRoutePoint::MWMRoutePointZero()
-            to:{destination, self.placePage.basePlacePageView.titleLabel.text}];
+                             to:{m_info.GetMercator(), self.placePage.basePlacePageView.titleLabel.text}];
 }
 
 - (void)routeFrom
@@ -249,11 +251,9 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (MWMRoutePoint)target
 {
-  UserMark const * m = m_userMark->GetUserMark();
-  m2::PointD const & org = m->GetPivot();
-  return m->GetMarkType() == UserMark::Type::MY_POSITION ?
-                          MWMRoutePoint(org) :
-                          MWMRoutePoint(org, self.placePage.basePlacePageView.titleLabel.text);
+  m2::PointD const & org = m_info.GetMercator();
+  return m_info.IsMyPosition() ? MWMRoutePoint(org)
+                               : MWMRoutePoint(org, self.placePage.basePlacePageView.titleLabel.text);
 }
 
 - (void)share
@@ -274,18 +274,18 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 - (void)apiBack
 {
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatAPI)];
-  ApiMarkPoint const * p = static_cast<ApiMarkPoint const *>(m_userMark->GetUserMark());
-  NSURL * url = [NSURL URLWithString:@(GetFramework().GenerateApiBackUrl(*p).c_str())];
+  NSURL * url = [NSURL URLWithString:@(m_info.GetApiUrl().c_str())];
   [[UIApplication sharedApplication] openURL:url];
   [self.delegate apiBack];
 }
 
-- (void)changeBookmarkCategory:(BookmarkAndCategory)bac;
+- (void)changeBookmarkCategory:(BookmarkAndCategory const &)bac
 {
-  BookmarkCategory * category = GetFramework().GetBmCategory(bac.first);
-  BookmarkCategory::Guard guard(*category);
-  UserMark const * bookmark = guard.m_controller.GetUserMark(bac.second);
-  m_userMark.reset(new UserMarkCopy(bookmark, false));
+  // TODO(AlexZ): Do we REALLY need this code?
+//  BookmarkCategory * category = GetFramework().GetBmCategory(bac.first);
+//  BookmarkCategory::Guard guard(*category);
+//  UserMark const * bookmark = guard.m_controller.GetUserMark(bac.second);
+//  m_userMark.reset(new UserMarkCopy(bookmark, false));
 }
 
 - (void)editPlace
@@ -299,20 +299,12 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatBookmarks)
                    withParameters:@{kStatValue : kStatAdd}];
   Framework & f = GetFramework();
-  BookmarkData data = BookmarkData(self.entity.title.UTF8String, f.LastEditedBMType());
+  BookmarkData bmData = { self.entity.title.UTF8String, f.LastEditedBMType() };
   size_t const categoryIndex = f.LastEditedBMCategory();
-  m2::PointD const mercator = m_userMark->GetUserMark()->GetPivot();
-  size_t const bookmarkIndex = f.GetBookmarkManager().AddBookmark(categoryIndex, mercator, data);
-  self.entity.bac = make_pair(categoryIndex, bookmarkIndex);
+  size_t const bookmarkIndex = f.GetBookmarkManager().AddBookmark(categoryIndex, m_info.GetMercator(), bmData);
+  m_info.m_bac = { categoryIndex, bookmarkIndex };
+  self.entity.bac = m_info.m_bac;
   self.entity.type = MWMPlacePageEntityTypeBookmark;
-
-  BookmarkCategory::Guard guard(*f.GetBmCategory(categoryIndex));
-
-  UserMark const * bookmark = guard.m_controller.GetUserMark(bookmarkIndex);
-  // TODO(AlexZ): Refactor bookmarks code together to hide this code in the Framework/Drape.
-  // UI code should never know about any guards, pointers to UserMark etc.
-  const_cast<UserMark *>(bookmark)->SetFeature(f.GetFeatureAtPoint(mercator));
-  m_userMark.reset(new UserMarkCopy(bookmark, false));
   [NSNotificationCenter.defaultCenter postNotificationName:kBookmarksChangedNotification
                                                     object:nil
                                                   userInfo:nil];
@@ -324,28 +316,18 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatBookmarks)
                    withParameters:@{kStatValue : kStatRemove}];
   Framework & f = GetFramework();
-  BookmarkAndCategory bookmarkAndCategory = self.entity.bac;
-  BookmarkCategory * bookmarkCategory = f.GetBookmarkManager().GetBmCategory(bookmarkAndCategory.first);
-  if (!bookmarkCategory)
-    return;
-
-  UserMark const * bookmark = bookmarkCategory->GetUserMark(bookmarkAndCategory.second);
-  ASSERT_EQUAL(bookmarkAndCategory, f.FindBookmark(bookmark), ());
-
-  self.entity.type = MWMPlacePageEntityTypeRegular;
-
-  // TODO(AlexZ): SetFeature is called in GetAddressMark here.
-  // UI code should never know about any guards, pointers to UserMark etc.
-  PoiMarkPoint const * poi = f.GetAddressMark(bookmark->GetPivot());
-  m_userMark.reset(new UserMarkCopy(poi, false));
+  BookmarkCategory * bookmarkCategory = f.GetBookmarkManager().GetBmCategory(self.entity.bac.first);
   if (bookmarkCategory)
   {
     {
       BookmarkCategory::Guard guard(*bookmarkCategory);
-      guard.m_controller.DeleteUserMark(bookmarkAndCategory.second);
+      guard.m_controller.DeleteUserMark(self.entity.bac.second);
     }
     bookmarkCategory->SaveToKMLFile();
   }
+  m_info.m_bac = MakeEmptyBookmarkAndCategory();
+  self.entity.bac = MakeEmptyBookmarkAndCategory();
+  self.entity.type = MWMPlacePageEntityTypeRegular;
   [NSNotificationCenter.defaultCenter postNotificationName:kBookmarksChangedNotification
                                                     object:nil
                                                   userInfo:nil];
@@ -380,11 +362,13 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 - (NSString *)distance
 {
   CLLocation * location = [MapsAppDelegate theApp].m_locationManager.lastLocation;
-  if (!location || !m_userMark)
+  // TODO(AlexZ): Do we REALLY need this check? Why this method is called if user mark/m_info is empty?
+  // TODO(AlexZ): Can location be checked before calling this method?
+  if (!location/* || !m_userMark*/)
     return @"";
   string distance;
   CLLocationCoordinate2D const coord = location.coordinate;
-  ms::LatLon const target = MercatorBounds::ToLatLon(m_userMark->GetUserMark()->GetPivot());
+  ms::LatLon const target = m_info.GetLatLon();
   MeasurementUtils::FormatDistance(ms::DistanceOnEarth(coord.latitude, coord.longitude,
                                                        target.lat, target.lon), distance);
   return @(distance.c_str());
@@ -393,10 +377,12 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 - (void)onCompassUpdate:(location::CompassInfo const &)info
 {
   CLLocation * location = [MapsAppDelegate theApp].m_locationManager.lastLocation;
-  if (!location || !m_userMark)
+  // TODO(AlexZ): Do we REALLY need this check? Why compass update is here if user mark/m_info is empty?
+  // TODO(AlexZ): Can location be checked before calling this method?
+  if (!location/* || !m_userMark*/)
     return;
 
-  CGFloat const angle = ang::AngleTo(location.mercator, m_userMark->GetUserMark()->GetPivot()) + info.m_bearing;
+  CGFloat const angle = ang::AngleTo(location.mercator, m_info.GetMercator()) + info.m_bearing;
   CGAffineTransform transform = CGAffineTransformMakeRotation(M_PI_2 - angle);
   [self.placePage setDirectionArrowTransform:transform];
   [self.directionView setDirectionArrowTransform:transform];

@@ -127,9 +127,9 @@ extern NSString * const kAlohalyticsTapEventKey;
   [self.placePageManager hidePlacePage];
 }
 
-- (void)showPlacePageWithUserMark:(unique_ptr<UserMarkCopy>)userMark
+- (void)showPlacePage:(place_page::Info const &)info
 {
-  [self.placePageManager showPlacePageWithUserMark:move(userMark)];
+  [self.placePageManager showPlacePage:info];
   [self refreshHelperPanels:UIInterfaceOrientationIsLandscape(self.ownerController.interfaceOrientation)];
 }
 
