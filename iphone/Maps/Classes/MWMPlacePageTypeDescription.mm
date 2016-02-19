@@ -38,12 +38,14 @@ CGFloat const kLeftOffset = 8.0;
   self = [super init];
   if (self)
   {
-    [[NSBundle mainBundle] loadNibNamed:kPlacePageDescriptionViewNibName owner:self options:nil];
-    if (entity.type == MWMPlacePageEntityTypeEle)
-      [static_cast<MWMPlacePageELEDescription *>(self.eleDescription) configureWithHeight:entity.typeDescriptionValue];
-    else
-      [static_cast<MWMPlacePageHotelDescription *>(self.hotelDescription) configureWithStarsCount:entity.typeDescriptionValue];
-    self.eleDescription.autoresizingMask = self.hotelDescription.autoresizingMask = UIViewAutoresizingNone;
+//TODO(Alex): If we can format subtitle in core we won't need this code.
+
+//    [[NSBundle mainBundle] loadNibNamed:kPlacePageDescriptionViewNibName owner:self options:nil];
+//    if (entity.type == MWMPlacePageEntityTypeEle)
+//      [static_cast<MWMPlacePageELEDescription *>(self.eleDescription) configureWithHeight:entity.typeDescriptionValue];
+//    else
+//      [static_cast<MWMPlacePageHotelDescription *>(self.hotelDescription) configureWithStarsCount:entity.typeDescriptionValue];
+//    self.eleDescription.autoresizingMask = self.hotelDescription.autoresizingMask = UIViewAutoresizingNone;
   }
   return self;
 }
