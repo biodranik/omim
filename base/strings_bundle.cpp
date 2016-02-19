@@ -22,5 +22,5 @@ string const StringsBundle::GetString(string const & name) const
     if (it != m_defValues.end())
       return it->second;
   }
-  return "";
+  return name;
 }

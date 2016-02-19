@@ -13,5 +13,6 @@ class StringsBundle
 public:
   void SetDefaultString(string const & name, string const & value);
   void SetString(string const & name, string const & value);
+  /// @returns name if string was not found.
   string const GetString(string const & name) const;
 };
