@@ -25,21 +25,11 @@
 extern NSString * const kAlohalyticsTapEventKey;
 extern NSString * const kBookmarksChangedNotification;
 
-typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
-{
-  MWMPlacePageManagerStateClosed,
-  MWMPlacePageManagerStateOpen
-};
-
-@interface MWMPlacePageViewManager () <LocationObserver, MWMPlacePageEntityProtocol>
-{
-  place_page::Info m_info;
-}
+@interface MWMPlacePageViewManager () <LocationObserver>
 
 @property (weak, nonatomic) UIViewController * ownerViewController;
 @property (nonatomic, readwrite) MWMPlacePageEntity * entity;
 @property (nonatomic) MWMPlacePage * placePage;
-@property (nonatomic) MWMPlacePageManagerState state;
 @property (nonatomic) MWMDirectionView * directionView;
 
 @property (weak, nonatomic) id<MWMPlacePageViewManagerProtocol> delegate;
@@ -56,7 +46,6 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   {
     self.ownerViewController = viewController;
     self.delegate = delegate;
-    self.state = MWMPlacePageManagerStateClosed;
   }
   return self;
 }
@@ -72,10 +61,10 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 //  if (!m_userMark)
 //    return;
   [self.delegate placePageDidClose];
-  self.state = MWMPlacePageManagerStateClosed;
   [self.placePage dismiss];
   [[MapsAppDelegate theApp].m_locationManager stop:self];
-  m_info = {};
+#warning (Alex): Why we have to call default constructor here?
+//  m_info = {};
   // TODO(AlexZ): What if we call it with true?
   GetFramework().DeactivateMapSelection(false);
   self.placePage = nil;
@@ -83,30 +72,30 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (void)showPlacePage:(place_page::Info const &)info
 {
-  m_info = info;
+#warning (Alex): Why we have to call default constructor here?
+//  m_info = info;
   [[MapsAppDelegate theApp].m_locationManager start:self];
-  [self reloadPlacePage];
-}
-
-- (void)reloadPlacePage
-{
-  // TODO(AlexZ): Do we need this check?
-//  if (!m_userMark)
-//    return;
-  self.entity = [[MWMPlacePageEntity alloc] initWithDelegate:self];
-  self.state = MWMPlacePageManagerStateOpen;
+  self.entity = [[MWMPlacePageEntity alloc] initWithInfo:info];
   if (IPAD)
     [self setPlacePageForiPad];
   else
     [self setPlacePageForiPhoneWithOrientation:self.ownerViewController.interfaceOrientation];
   [self configPlacePage];
+//  [self reloadPlacePage];
 }
 
-#pragma mark - MWMPlacePageEntityProtocol
-
-- (place_page::Info const &)info
+- (void)reloadPlacePage
 {
-  return m_info;
+//TODO(Alex): Probably we don't need this method.
+  // TODO(AlexZ): Do we need this check?
+//  if (!m_userMark)
+//    return;
+//  self.entity = [[MWMPlacePageEntity alloc] initWithDelegate:self];
+//  if (IPAD)
+//    [self setPlacePageForiPad];
+//  else
+//    [self setPlacePageForiPhoneWithOrientation:self.ownerViewController.interfaceOrientation];
+//  [self configPlacePage];
 }
 
 #pragma mark - Layout
@@ -142,7 +131,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (void)configPlacePage
 {
-  if (self.entity.type == MWMPlacePageEntityTypeMyPosition)
+  if (self.entity.isMyPosition)
   {
     BOOL hasSpeed;
     self.entity.category = [[MapsAppDelegate theApp].m_locationManager formattedSpeedAndAltitude:hasSpeed];
@@ -179,7 +168,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (void)updateMyPositionSpeedAndAltitude
 {
-  if (self.entity.type != MWMPlacePageEntityTypeMyPosition)
+  if (!self.entity.isMyPosition)
     return;
   BOOL hasSpeed = NO;
   [self.placePage updateMyPositionStatus:[[MapsAppDelegate theApp].m_locationManager
@@ -188,9 +177,6 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (void)setPlacePageForiPhoneWithOrientation:(UIInterfaceOrientation)orientation
 {
-  if (self.state == MWMPlacePageManagerStateClosed)
-    return;
-
   switch (orientation)
   {
     case UIInterfaceOrientationLandscapeLeft:
@@ -228,7 +214,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   [self.delegate buildRouteFrom:mode != EMyPositionMode::MODE_UNKNOWN_POSITION && mode != EMyPositionMode::MODE_PENDING_POSITION ?
                                                      MWMRoutePoint(myPosition) :
                                               MWMRoutePoint::MWMRoutePointZero()
-                             to:{m_info.GetMercator(), self.placePage.basePlacePageView.titleLabel.text}];
+                             to:{self.entity.mercator, self.placePage.basePlacePageView.titleLabel.text}];
 }
 
 - (void)routeFrom
@@ -251,8 +237,8 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 
 - (MWMRoutePoint)target
 {
-  m2::PointD const & org = m_info.GetMercator();
-  return m_info.IsMyPosition() ? MWMRoutePoint(org)
+  m2::PointD const & org = self.entity.mercator;
+  return self.entity.isMyPosition ? MWMRoutePoint(org)
                                : MWMRoutePoint(org, self.placePage.basePlacePageView.titleLabel.text);
 }
 
@@ -274,8 +260,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
 - (void)apiBack
 {
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatAPI)];
-  NSURL * url = [NSURL URLWithString:@(m_info.GetApiUrl().c_str())];
-  [[UIApplication sharedApplication] openURL:url];
+  [[UIApplication sharedApplication] openURL:[NSURL URLWithString:self.entity.apiURL]];
   [self.delegate apiBack];
 }
 
@@ -301,10 +286,8 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   Framework & f = GetFramework();
   BookmarkData bmData = { self.entity.title.UTF8String, f.LastEditedBMType() };
   size_t const categoryIndex = f.LastEditedBMCategory();
-  size_t const bookmarkIndex = f.GetBookmarkManager().AddBookmark(categoryIndex, m_info.GetMercator(), bmData);
-  m_info.m_bac = { categoryIndex, bookmarkIndex };
-  self.entity.bac = m_info.m_bac;
-  self.entity.type = MWMPlacePageEntityTypeBookmark;
+  size_t const bookmarkIndex = f.GetBookmarkManager().AddBookmark(categoryIndex, self.entity.mercator, bmData);
+  self.entity.bac = {categoryIndex, bookmarkIndex};
   [NSNotificationCenter.defaultCenter postNotificationName:kBookmarksChangedNotification
                                                     object:nil
                                                   userInfo:nil];
@@ -325,9 +308,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
     }
     bookmarkCategory->SaveToKMLFile();
   }
-  m_info.m_bac = MakeEmptyBookmarkAndCategory();
   self.entity.bac = MakeEmptyBookmarkAndCategory();
-  self.entity.type = MWMPlacePageEntityTypeRegular;
   [NSNotificationCenter.defaultCenter postNotificationName:kBookmarksChangedNotification
                                                     object:nil
                                                   userInfo:nil];
@@ -368,7 +349,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
     return @"";
   string distance;
   CLLocationCoordinate2D const coord = location.coordinate;
-  ms::LatLon const target = m_info.GetLatLon();
+  ms::LatLon const target = self.entity.latlon;
   MeasurementUtils::FormatDistance(ms::DistanceOnEarth(coord.latitude, coord.longitude,
                                                        target.lat, target.lon), distance);
   return @(distance.c_str());
@@ -382,7 +363,7 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageManagerState)
   if (!location/* || !m_userMark*/)
     return;
 
-  CGFloat const angle = ang::AngleTo(location.mercator, m_info.GetMercator()) + info.m_bearing;
+  CGFloat const angle = ang::AngleTo(location.mercator, self.entity.mercator) + info.m_bearing;
   CGAffineTransform transform = CGAffineTransformMakeRotation(M_PI_2 - angle);
   [self.placePage setDirectionArrowTransform:transform];
   [self.directionView setDirectionArrowTransform:transform];

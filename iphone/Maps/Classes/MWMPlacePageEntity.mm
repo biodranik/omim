@@ -16,17 +16,19 @@ namespace
 
 NSString * const kOSMCuisineSeparator = @";";
 
-NSString * makeOSMCuisineString(NSSet<NSString *> * cuisines)
-{
-  NSMutableArray<NSString *> * osmCuisines = [NSMutableArray arrayWithCapacity:cuisines.count];
-  for (NSString * cuisine in cuisines)
-    [osmCuisines addObject:cuisine];
-  [osmCuisines sortUsingComparator:^NSComparisonResult(NSString * s1, NSString * s2)
-  {
-    return [s1 compare:s2];
-  }];
-  return [osmCuisines componentsJoinedByString:kOSMCuisineSeparator];
-}
+//TODO(Alex): If we can format cuisines in subtitle we won't need this function.
+
+//NSString * makeOSMCuisineString(NSSet<NSString *> * cuisines)
+//{
+//  NSMutableArray<NSString *> * osmCuisines = [NSMutableArray arrayWithCapacity:cuisines.count];
+//  for (NSString * cuisine in cuisines)
+//    [osmCuisines addObject:cuisine];
+//  [osmCuisines sortUsingComparator:^NSComparisonResult(NSString * s1, NSString * s2)
+//  {
+//    return [s1 compare:s2];
+//  }];
+//  return [osmCuisines componentsJoinedByString:kOSMCuisineSeparator];
+//}
 
 NSUInteger gMetaFieldsMap[MWMPlacePageCellTypeCount] = {};
 
@@ -59,7 +61,6 @@ void initFieldsMap()
 
 @interface MWMPlacePageEntity ()
 
-@property (weak, nonatomic) id<MWMPlacePageEntityProtocol> delegate;
 @property (nonatomic, readwrite) BOOL canEditObject;
 
 @end
@@ -68,6 +69,7 @@ void initFieldsMap()
 {
   set<MWMPlacePageCellType> m_editableFields;
   MWMPlacePageCellTypeValueMap m_values;
+  place_page::Info m_info;
 }
 
 + (NSString *)makeMWMCuisineString:(NSSet<NSString *> *)cuisines
@@ -88,13 +90,12 @@ void initFieldsMap()
   return [localizedCuisines componentsJoinedByString:kMWMCuisineSeparator];
 }
 
-- (instancetype)initWithDelegate:(id<MWMPlacePageEntityProtocol>)delegate
+- (instancetype)initWithInfo:(const place_page::Info &)info
 {
-  NSAssert(delegate, @"delegate can not be nil.");
   self = [super init];
   if (self)
   {
-    _delegate = delegate;
+    m_info = info;
     initFieldsMap();
     [self config];
   }
@@ -103,20 +104,17 @@ void initFieldsMap()
 
 - (void)config
 {
-  auto const & info = self.delegate.info;
-  _latlon = info.GetLatLon();
+  if (m_info.IsFeature())
+    [self configureWithFeature];
 
-  if (info.IsFeature())
-    [self configureWithFeature:info];
+  if (m_info.IsMyPosition())
+    [self configureForMyPosition];
 
-  if (info.IsMyPosition())
-    [self configureForMyPosition:info];
+  if (m_info.HasApiUrl())
+    [self configureForApi];
 
-  if (info.HasApiUrl())
-    [self configureForApi:info];
-
-  if (info.IsBookmark())
-    [self configureForBookmark:info];
+  if (m_info.IsBookmark())
+    [self configureForBookmark];
 
   [self setEditableTypes];
 }
@@ -131,13 +129,10 @@ void initFieldsMap()
     m_values[cellType] = value;
 }
 
-- (void)configureForBookmark:(place_page::Info const &)info
+- (void)configureForBookmark
 {
-  self.type = MWMPlacePageEntityTypeBookmark;
-  // TODO(AlexZ): Do we really need to store a copy of bac in self?
-  self.bac = info.m_bac;
-  BookmarkCategory * cat = GetFramework().GetBmCategory(info.m_bac.first);
-  BookmarkData const & data = static_cast<Bookmark const *>(cat->GetUserMark(info.m_bac.second))->GetData();
+  BookmarkCategory * cat = GetFramework().GetBmCategory(m_info.m_bac.first);
+  BookmarkData const & data = static_cast<Bookmark const *>(cat->GetUserMark(m_info.m_bac.second))->GetData();
 
   self.bookmarkTitle = @(data.GetName().c_str());
   self.bookmarkCategory = @(cat->GetName().c_str());
@@ -147,35 +142,33 @@ void initFieldsMap()
   self.bookmarkColor = @(data.GetType().c_str());
 }
 
-- (void)configureForMyPosition:(place_page::Info const &)info
+- (void)configureForMyPosition
 {
   // TODO: Refactor these configure* methods.
-//  self.title = @(info.GetTitle().c_str());//L(@"my_position");
-  self.type = MWMPlacePageEntityTypeMyPosition;
+//  self.title = @(m_info.GetTitle().c_str());//L(@"my_position");
 }
 
-- (void)configureForApi:(place_page::Info const &)info
+- (void)configureForApi
 {
-  self.type = MWMPlacePageEntityTypeAPI;
-//  self.title = @(info.GetTitle().c_str());
+//  self.title = @(m_info.GetTitle().c_str());
   self.category = @(GetFramework().GetApiDataHolder().GetAppTitle().c_str());
 }
 
-- (void)configureWithFeature:(place_page::Info const &)info
+- (void)configureWithFeature
 {
-  search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(info.GetMercator());
-  self.title = @(info.GetTitle().c_str());
+  search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(m_info.GetMercator());
+  self.title = @(m_info.GetTitle().c_str());
   // TODO: Review subtitle logic. It's better to create it in info in C++.
-  NSMutableArray * subtitle = [[NSMutableArray alloc] init];
-  if (!info.GetSubtitle().empty())
-    [subtitle addObject:@(info.GetSubtitle().c_str())];
+  NSMutableArray * subtitle = [@[] mutableCopy];
+  if (!m_info.GetSubtitle().empty())
+    [subtitle addObject:@(m_info.GetSubtitle().c_str())];
   self.address = @(address.FormatAddress().c_str());
 
   // TODO(AlexZ): Do we need this house logic?
   if (!address.m_house.empty())
     [self setMetaField:MWMPlacePageCellTypeBuilding value:address.m_house];
 
-  feature::Metadata const & md = info.GetMetadata();
+  feature::Metadata const & md = m_info.GetMetadata();
   for (auto const type : md.GetPresentTypes())
   {
     switch (type)
@@ -247,13 +240,13 @@ void initFieldsMap()
 - (void)processStreets
 {
   Framework & frm = GetFramework();
-  auto const streets = frm.GetNearbyFeatureStreets(self.delegate.info.m_featureID);
+  auto const streets = frm.GetNearbyFeatureStreets(m_info.m_featureID);
   NSMutableArray * arr = [[NSMutableArray alloc] initWithCapacity:streets.size()];
   for (auto const & street : streets)
     [arr addObject:@(street.c_str())];
   self.nearbyStreets = arr;
 
-  auto const info = frm.GetFeatureAddressInfo(self.delegate.info.m_featureID);
+  auto const info = frm.GetFeatureAddressInfo(m_info.m_featureID);
   [self setMetaField:MWMPlacePageCellTypeStreet value:info.m_street];
 }
 
@@ -262,8 +255,8 @@ void initFieldsMap()
 - (void)setEditableTypes
 {
   // TODO(AlexZ): Refactor editor interface to accept FeatureID.
-  auto const feature = GetFramework().GetFeatureByID(self.delegate.info.m_featureID);
-  osm::EditableProperties const editable = osm::Editor::Instance().GetEditableProperties(*feature);
+  auto const feature = GetFramework().GetFeatureByID(m_info.m_featureID);
+  auto const editable = osm::Editor::Instance().GetEditableProperties(*feature);
   self.canEditObject = editable.IsEditable();
   if (editable.m_name)
     m_editableFields.insert(MWMPlacePageCellTypeName);
@@ -283,6 +276,11 @@ void initFieldsMap()
 - (BOOL)isCellEditable:(MWMPlacePageCellType)cellType
 {
   return m_editableFields.count(cellType) == 1;
+}
+
+- (void)saveEditing:(osm::EditableFeature const &)feature
+{
+
 }
 
 - (void)saveEditedCells:(MWMPlacePageCellTypeValueMap const &)cells
@@ -361,7 +359,7 @@ void initFieldsMap()
     case MWMPlacePageCellTypeCoordinate:
       return [self coordinate];
     case MWMPlacePageCellTypeBookmark:
-      return self.type == MWMPlacePageEntityTypeBookmark ? @"haveValue" : nil;
+      return m_info.IsBookmark() ? @"haveValue" : nil;
     case MWMPlacePageCellTypeEditButton:
       return self.canEditObject ? @"haveValue" : nil;
     default:
@@ -373,14 +371,43 @@ void initFieldsMap()
   }
 }
 
+- (BOOL)isMyPosition
+{
+  return m_info.IsMyPosition();
+}
+
+- (BOOL)isBookmark
+{
+  return m_info.IsBookmark();
+}
+
+- (BOOL)isApi
+{
+  return m_info.HasApiUrl();
+}
+
+- (ms::LatLon)latlon
+{
+  return m_info.GetLatLon();
+}
+
+- (m2::PointD const &)mercator
+{
+  return m_info.GetMercator();
+}
+
+- (NSString *)apiURL
+{
+  return @(m_info.GetApiUrl().c_str());
+}
+
 - (NSString *)coordinate
 {
   BOOL const useDMSFormat =
       [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsLatLonAsDMSKey];
   ms::LatLon const latlon = self.latlon;
   return @((useDMSFormat ? MeasurementUtils::FormatLatLon(latlon.lat, latlon.lon)
-                         : MeasurementUtils::FormatLatLonAsDMS(latlon.lat, latlon.lon, 2))
-               .c_str());
+                         : MeasurementUtils::FormatLatLonAsDMS(latlon.lat, latlon.lon, 2)).c_str());
 }
 
 #pragma mark - Properties
@@ -403,6 +430,16 @@ void initFieldsMap()
 }
 
 #pragma mark - Bookmark editing
+
+- (void)setBac:(BookmarkAndCategory)bac
+{
+  m_info.m_bac = bac;
+}
+
+- (BookmarkAndCategory)bac
+{
+  return m_info.m_bac;
+}
 
 - (NSString *)bookmarkCategory
 {

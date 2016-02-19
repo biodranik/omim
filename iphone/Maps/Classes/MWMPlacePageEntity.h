@@ -22,25 +22,9 @@ typedef NS_ENUM(NSUInteger, MWMPlacePageCellType)
   MWMPlacePageCellTypeCount
 };
 
-typedef NS_ENUM(NSUInteger, MWMPlacePageEntityType)
-{
-  MWMPlacePageEntityTypeRegular,
-  MWMPlacePageEntityTypeBookmark,
-  MWMPlacePageEntityTypeEle,
-  MWMPlacePageEntityTypeHotel,
-  MWMPlacePageEntityTypeAPI,
-  MWMPlacePageEntityTypeMyPosition
-};
-
 using MWMPlacePageCellTypeValueMap = map<MWMPlacePageCellType, string>;
 
 @class MWMPlacePageViewManager;
-
-@protocol MWMPlacePageEntityProtocol <NSObject>
-
-- (place_page::Info const &)info;
-
-@end
 
 @interface MWMPlacePageEntity : NSObject
 
@@ -58,16 +42,19 @@ using MWMPlacePageCellTypeValueMap = map<MWMPlacePageCellType, string>;
 @property (copy, nonatomic) NSArray<NSString *> * nearbyStreets;
 @property (nonatomic, readonly) BOOL canEditObject;
 
-@property (nonatomic) MWMPlacePageEntityType type;
-
 @property (nonatomic) int typeDescriptionValue;
 
 @property (nonatomic) BookmarkAndCategory bac;
 @property (weak, nonatomic) MWMPlacePageViewManager * manager;
 
-@property (nonatomic, readonly) ms::LatLon latlon;
+- (BOOL)isMyPosition;
+- (BOOL)isBookmark;
+- (BOOL)isApi;
+- (ms::LatLon)latlon;
+- (m2::PointD const &)mercator;
+- (NSString *)apiURL;
 
-- (instancetype)initWithDelegate:(id<MWMPlacePageEntityProtocol>)delegate;
+- (instancetype)initWithInfo:(place_page::Info const &)info;
 - (void)synchronize;
 
 - (void)toggleCoordinateSystem;

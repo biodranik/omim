@@ -135,7 +135,7 @@ extern NSString * const kAlohalyticsTapEventKey;
 
 - (void)reloadPlacePage
 {
-  [self.placePageManager reloadPlacePage];
+//  [self.placePageManager reloadPlacePage];
 }
 
 - (void)apiBack
