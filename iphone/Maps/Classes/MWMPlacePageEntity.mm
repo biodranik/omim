@@ -159,9 +159,11 @@ void initFieldsMap()
   search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(m_info.GetMercator());
   self.title = @(m_info.GetTitle().c_str());
   // TODO: Review subtitle logic. It's better to create it in info in C++.
-  NSMutableArray * subtitle = [@[] mutableCopy];
-  if (!m_info.GetSubtitle().empty())
-    [subtitle addObject:@(m_info.GetSubtitle().c_str())];
+//  NSMutableArray * subtitle = [@[] mutableCopy];
+  auto const subtitle = m_info.GetSubtitle();
+  if (!subtitle.empty())
+    self.category = @(subtitle.c_str());
+//    [subtitle addObject:@(m_info.GetSubtitle().c_str())];
   self.address = @(address.FormatAddress().c_str());
 
   // TODO(AlexZ): Do we need this house logic?

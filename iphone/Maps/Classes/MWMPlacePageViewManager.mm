@@ -60,8 +60,7 @@ extern NSString * const kBookmarksChangedNotification;
   [self.delegate placePageDidClose];
   [self.placePage dismiss];
   [[MapsAppDelegate theApp].m_locationManager stop:self];
-  // TODO(AlexZ): What if we call it with true?
-  GetFramework().DeactivateMapSelection(false);
+  GetFramework().DeactivateMapSelection(true);
   self.placePage = nil;
 }
 
