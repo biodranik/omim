@@ -6,7 +6,6 @@
 #import "MWMPlacePageEntity.h"
 #import "MWMPlacePageInfoCell.h"
 #import "MWMPlacePageOpeningHoursCell.h"
-#import "MWMPlacePageTypeDescription.h"
 #import "MWMPlacePageViewManager.h"
 #import "Statistics.h"
 #import "UIColor+MapsMeColor.h"
@@ -173,22 +172,6 @@ enum class AttributePosition
     }
   }
 
-  [self.typeDescriptionView removeFromSuperview];
-
-  //TODO(Alex): If we can format subtitle in core we won't need this code.
-//  if (type == MWMPlacePageEntityTypeEle || type == MWMPlacePageEntityTypeHotel)
-//  {
-//    MWMPlacePageTypeDescription * description = [[MWMPlacePageTypeDescription alloc] initWithPlacePageEntity:entity];
-//    self.typeDescriptionView = static_cast<MWMPlacePageTypeDescriptionView *>(type == MWMPlacePageEntityTypeEle ?
-//                                                                              description.eleDescription :
-//                                                                              description.hotelDescription);
-//    [self addSubview:self.typeDescriptionView];
-//  }
-//  else
-//  {
-//    self.typeDescriptionView = nil;
-//  }
-
   BOOL const isMyPosition = entity.isMyPosition;
   self.addressLabel.text = entity.address;
   BOOL const isHeadingAvaible = [CLLocationManager headingAvailable];
@@ -209,9 +192,9 @@ enum class AttributePosition
 
 - (AttributePosition)distanceAttributePosition
 {
-  if ((self.typeLabel.text.length || self.typeDescriptionView))
+  if (self.typeLabel.text.length)
     return AttributePosition::Type;
-  else if ((!self.typeLabel.text.length && !self.typeDescriptionView) && self.addressLabel.text.length)
+  else if (!self.typeLabel.text.length && self.addressLabel.text.length)
     return AttributePosition::Address;
   else
     return AttributePosition::Title;
@@ -259,7 +242,6 @@ enum class AttributePosition
   [self.typeLabel sizeToFit];
   [self.addressLabel sizeToFit];
   [self layoutLabels];
-  [self.typeDescriptionView layoutNearPoint:{self.typeLabel.maxX, self.typeLabel.minY}];
   [self layoutDistanceBoxWithPosition:position];
   [self layoutTableViewWithPosition:position];
   self.height = self.featureTable.height + self.separatorView.height + self.titleLabel.height +
@@ -326,8 +308,6 @@ enum class AttributePosition
 {
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatToggleBookmark)
                    withParameters:@{kStatValue : kStatAdd}];
-  [self.typeDescriptionView removeFromSuperview];
-  self.typeDescriptionView = nil;
   [self.typeLabel sizeToFit];
 
   m_sections.push_back(PlacePageSection::Bookmark);
