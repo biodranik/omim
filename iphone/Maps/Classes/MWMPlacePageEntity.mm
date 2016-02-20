@@ -104,19 +104,12 @@ void initFieldsMap()
 
 - (void)config
 {
+  [self configureDefault];
+
   if (m_info.IsFeature())
-    [self configureWithFeature];
-
-  if (m_info.IsMyPosition())
-    [self configureForMyPosition];
-
-  if (m_info.HasApiUrl())
-    [self configureForApi];
-
+    [self configureFeature];
   if (m_info.IsBookmark())
-    [self configureForBookmark];
-
-  [self setEditableTypes];
+    [self configureBookmark];
 }
 
 - (void)setMetaField:(NSUInteger)key value:(string const &)value
@@ -129,43 +122,17 @@ void initFieldsMap()
     m_values[cellType] = value;
 }
 
-- (void)configureForBookmark
-{
-  BookmarkCategory * cat = GetFramework().GetBmCategory(m_info.m_bac.first);
-  BookmarkData const & data = static_cast<Bookmark const *>(cat->GetUserMark(m_info.m_bac.second))->GetData();
-
-  self.bookmarkTitle = @(data.GetName().c_str());
-  self.bookmarkCategory = @(cat->GetName().c_str());
-  string const & description = data.GetDescription();
-  self.bookmarkDescription = @(description.c_str());
-  _isHTMLDescription = strings::IsHTML(description);
-  self.bookmarkColor = @(data.GetType().c_str());
-}
-
-- (void)configureForMyPosition
-{
-  // TODO: Refactor these configure* methods.
-//  self.title = @(m_info.GetTitle().c_str());//L(@"my_position");
-}
-
-- (void)configureForApi
-{
-//  self.title = @(m_info.GetTitle().c_str());
-  self.category = @(GetFramework().GetApiDataHolder().GetAppTitle().c_str());
-}
-
-- (void)configureWithFeature
+- (void)configureDefault
 {
   search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(m_info.GetMercator());
   self.title = @(m_info.GetTitle().c_str());
-  // TODO: Review subtitle logic. It's better to create it in info in C++.
-//  NSMutableArray * subtitle = [@[] mutableCopy];
-  auto const subtitle = m_info.GetSubtitle();
-  if (!subtitle.empty())
-    self.category = @(subtitle.c_str());
-//    [subtitle addObject:@(m_info.GetSubtitle().c_str())];
+  self.category = @(m_info.GetSubtitle().c_str());
   self.address = @(address.FormatAddress().c_str());
+}
 
+- (void)configureFeature
+{
+  search::AddressInfo const address = GetFramework().GetAddressInfoAtPoint(m_info.GetMercator());
   // TODO(AlexZ): Do we need this house logic?
   if (!address.m_house.empty())
     [self setMetaField:MWMPlacePageCellTypeBuilding value:address.m_house];
@@ -175,39 +142,6 @@ void initFieldsMap()
   {
     switch (type)
     {
-//    case Metadata::FMD_CUISINE:
-//      {
-//        [self deserializeCuisine:@(md.Get(type).c_str())];
-//        NSString * cuisine = [self getCellValue:MWMPlacePageCellTypeCuisine];
-//        if (self.category.length == 0)
-//          self.category = cuisine;
-//        else if (![self.category isEqualToString:cuisine])
-//          self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, cuisine];
-//        break;
-//      }
-//      case Metadata::FMD_ELE:
-//      {
-//        self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
-//        if (self.type != MWMPlacePageEntityTypeBookmark)
-//          self.type = MWMPlacePageEntityTypeEle;
-//        break;
-//      }
-//      case Metadata::FMD_OPERATOR:
-//      {
-//        NSString * bank = @(metadata.Get(type).c_str());
-//        if (self.category.length)
-//          self.category = [NSString stringWithFormat:@"%@%@%@", self.category, kMWMCuisineSeparator, bank];
-//        else
-//          self.category = bank;
-//        break;
-//      }
-//      case Metadata::FMD_STARS:
-//      {
-//        self.typeDescriptionValue = atoi(metadata.Get(type).c_str());
-//        if (self.type != MWMPlacePageEntityTypeBookmark)
-//          self.type = MWMPlacePageEntityTypeHotel;
-//        break;
-//      }
       case Metadata::FMD_URL:
       case Metadata::FMD_WEBSITE:
       case Metadata::FMD_PHONE_NUMBER:
@@ -225,6 +159,20 @@ void initFieldsMap()
   }
 
   [self processStreets];
+  [self setEditableTypes];
+}
+
+- (void)configureBookmark
+{
+  BookmarkCategory * cat = GetFramework().GetBmCategory(m_info.m_bac.first);
+  BookmarkData const & data = static_cast<Bookmark const *>(cat->GetUserMark(m_info.m_bac.second))->GetData();
+
+  self.bookmarkTitle = @(data.GetName().c_str());
+  self.bookmarkCategory = @(cat->GetName().c_str());
+  string const & description = data.GetDescription();
+  self.bookmarkDescription = @(description.c_str());
+  _isHTMLDescription = strings::IsHTML(description);
+  self.bookmarkColor = @(data.GetType().c_str());
 }
 
 - (void)toggleCoordinateSystem
