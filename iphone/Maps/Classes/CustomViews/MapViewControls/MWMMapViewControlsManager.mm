@@ -133,11 +133,6 @@ extern NSString * const kAlohalyticsTapEventKey;
   [self refreshHelperPanels:UIInterfaceOrientationIsLandscape(self.ownerController.interfaceOrientation)];
 }
 
-- (void)reloadPlacePage
-{
-//  [self.placePageManager reloadPlacePage];
-}
-
 - (void)apiBack
 {
   [self.ownerController.apiBar back];

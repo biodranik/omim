@@ -57,14 +57,9 @@ extern NSString * const kBookmarksChangedNotification;
 
 - (void)dismissPlacePage
 {
-// TODO(AlexZ): which code used this check? Do we need it?
-//  if (!m_userMark)
-//    return;
   [self.delegate placePageDidClose];
   [self.placePage dismiss];
   [[MapsAppDelegate theApp].m_locationManager stop:self];
-#warning (Alex): Why we have to call default constructor here?
-//  m_info = {};
   // TODO(AlexZ): What if we call it with true?
   GetFramework().DeactivateMapSelection(false);
   self.placePage = nil;
@@ -72,8 +67,6 @@ extern NSString * const kBookmarksChangedNotification;
 
 - (void)showPlacePage:(place_page::Info const &)info
 {
-#warning (Alex): Why we have to call default constructor here?
-//  m_info = info;
   [[MapsAppDelegate theApp].m_locationManager start:self];
   self.entity = [[MWMPlacePageEntity alloc] initWithInfo:info];
   if (IPAD)
@@ -81,21 +74,6 @@ extern NSString * const kBookmarksChangedNotification;
   else
     [self setPlacePageForiPhoneWithOrientation:self.ownerViewController.interfaceOrientation];
   [self configPlacePage];
-//  [self reloadPlacePage];
-}
-
-- (void)reloadPlacePage
-{
-//TODO(Alex): Probably we don't need this method.
-  // TODO(AlexZ): Do we need this check?
-//  if (!m_userMark)
-//    return;
-//  self.entity = [[MWMPlacePageEntity alloc] initWithDelegate:self];
-//  if (IPAD)
-//    [self setPlacePageForiPad];
-//  else
-//    [self setPlacePageForiPhoneWithOrientation:self.ownerViewController.interfaceOrientation];
-//  [self configPlacePage];
 }
 
 #pragma mark - Layout
@@ -262,15 +240,6 @@ extern NSString * const kBookmarksChangedNotification;
   [[Statistics instance] logEvent:kStatEventName(kStatPlacePage, kStatAPI)];
   [[UIApplication sharedApplication] openURL:[NSURL URLWithString:self.entity.apiURL]];
   [self.delegate apiBack];
-}
-
-- (void)changeBookmarkCategory:(BookmarkAndCategory const &)bac
-{
-  // TODO(AlexZ): Do we REALLY need this code?
-//  BookmarkCategory * category = GetFramework().GetBmCategory(bac.first);
-//  BookmarkCategory::Guard guard(*category);
-//  UserMark const * bookmark = guard.m_controller.GetUserMark(bac.second);
-//  m_userMark.reset(new UserMarkCopy(bookmark, false));
 }
 
 - (void)editPlace

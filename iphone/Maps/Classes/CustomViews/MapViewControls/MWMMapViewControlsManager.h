@@ -35,7 +35,6 @@
 
 - (void)dismissPlacePage;
 - (void)showPlacePage:(place_page::Info const &)info;
-- (void)reloadPlacePage;
 
 #pragma mark - MWMNavigationDashboardManager
 
