@@ -1,6 +1,5 @@
 #include "Framework.h"
 
-#include "map/user_mark.hpp"
 #include "indexer/feature_meta.hpp"
 
 typedef NS_ENUM(NSUInteger, MWMPlacePageCellType)
@@ -47,6 +46,7 @@ using MWMPlacePageCellTypeValueMap = map<MWMPlacePageCellType, string>;
 @property (nonatomic) BookmarkAndCategory bac;
 @property (weak, nonatomic) MWMPlacePageViewManager * manager;
 
+- (FeatureID const &)featureID;
 - (BOOL)isMyPosition;
 - (BOOL)isBookmark;
 - (BOOL)isApi;
@@ -62,5 +62,6 @@ using MWMPlacePageCellTypeValueMap = map<MWMPlacePageCellType, string>;
 - (NSString *)getCellValue:(MWMPlacePageCellType)cellType;
 - (BOOL)isCellEditable:(MWMPlacePageCellType)cellType;
 - (void)saveEditedCells:(MWMPlacePageCellTypeValueMap const &)cells;
+- (void)saveEditing:(osm::EditableFeature const &)feature;
 
 @end

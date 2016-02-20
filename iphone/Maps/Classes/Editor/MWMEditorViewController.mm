@@ -78,6 +78,7 @@ NSString * reuseIdentifier(MWMPlacePageCellType cellType)
   vector<MWMEditorSection> m_sections;
   map<MWMEditorSection, vector<MWMPlacePageCellType>> m_cells;
   MWMPlacePageCellTypeValueMap m_edited_cells;
+  osm::EditableFeature m_editableFeature;
 }
 
 - (void)viewDidLoad
@@ -86,6 +87,13 @@ NSString * reuseIdentifier(MWMPlacePageCellType cellType)
   [super viewDidLoad];
   [self configTable];
   [self configNavBar];
+}
+
+- (void)setEntity:(MWMPlacePageEntity *)entity
+{
+  _entity = entity;
+  NSAssert(GetFramework().GetEditableFeature(entity.featureID, m_editableFeature), @"Incorrect feature");
+  GetFramework().GetEditableFeature(entity.featureID, m_editableFeature);
 }
 
 - (void)viewWillAppear:(BOOL)animated

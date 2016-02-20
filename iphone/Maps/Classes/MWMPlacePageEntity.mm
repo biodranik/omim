@@ -230,7 +230,7 @@ void initFieldsMap()
 
 - (void)saveEditing:(osm::EditableFeature const &)feature
 {
-
+  GetFramework().SaveEditedFeature(feature);
 }
 
 - (void)saveEditedCells:(MWMPlacePageCellTypeValueMap const &)cells
@@ -319,6 +319,11 @@ void initFieldsMap()
       return haveField ? @(it->second.c_str()) : nil;
     }
   }
+}
+
+- (FeatureID const &)featureID
+{
+  return m_info.m_featureID;
 }
 
 - (BOOL)isMyPosition
