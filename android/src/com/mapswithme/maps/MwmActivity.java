@@ -41,6 +41,7 @@ import com.mapswithme.maps.downloader.DownloaderFragment;
 import com.mapswithme.maps.downloader.MapManager;
 import com.mapswithme.maps.downloader.OnmapDownloader;
 import com.mapswithme.maps.editor.AuthFragment;
+import com.mapswithme.maps.editor.Editor;
 import com.mapswithme.maps.editor.EditorActivity;
 import com.mapswithme.maps.editor.EditorHostFragment;
 import com.mapswithme.maps.location.LocationHelper;
@@ -251,16 +252,19 @@ public class MwmActivity extends BaseMwmFragmentActivity
       SearchActivity.start(this, query);
   }
 
-  public void showEditor(MapObject point)
+  public void showEditor()
   {
     if (mIsFragmentContainer)
     {
       final Bundle args = new Bundle();
-      args.putParcelable(EditorHostFragment.EXTRA_MAP_OBJECT, point);
       replaceFragment(EditorHostFragment.class, args, null);
     }
     else
-      EditorActivity.start(this, point);
+    {
+      // Initializes editable feature from currently active place page.
+      Editor.nativeStartEdit();
+      EditorActivity.start(this);
+    }
   }
 
   private void shareMyLocation()
@@ -1009,7 +1013,7 @@ public class MwmActivity extends BaseMwmFragmentActivity
       if (request == null)
         return;
 
-      request.setPointData(object.getLat(), object.getLon(), object.getName(), object.getSearchId());
+      request.setPointData(object.getLat(), object.getLon(), object.getTitle(), object.getSearchId());
       object.setTypeName(request.getCallerName(MwmApplication.get()).toString());
 
     }
