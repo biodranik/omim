@@ -2331,11 +2331,7 @@ bool Framework::GetEditableMapObject(FeatureID const & fid, osm::EditableMapObje
 
 osm::Editor::SaveResult Framework::SaveEditedMapObject(osm::EditableMapObject const & emo) const
 {
-  // TODO(AlexZ): Move this code to the Editor.
-  auto feature = GetFeatureByID(emo.GetID());
-  FeatureType & ft = *feature;
-  ft.ApplyPatch(emo);
-  return osm::Editor::Instance().SaveEditedFeature(ft, emo.GetStreet(), emo.GetHouseNumber());
+  return osm::Editor::Instance().SaveEditedFeature(emo);
 }
 
 void Framework::DeleteFeature(FeatureID const & fid) const

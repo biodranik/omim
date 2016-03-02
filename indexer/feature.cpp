@@ -78,6 +78,8 @@ void FeatureType::ApplyPatch(editor::XMLFeature const & xml)
   // m_params.rank =
   m_bCommonParsed = true;
 
+  // TODO(mgsergio): Restore type from xml.
+
   for (auto const i : my::UpTo(1u, static_cast<uint32_t>(feature::Metadata::FMD_COUNT)))
   {
     auto const type = static_cast<feature::Metadata::EType>(i);
@@ -110,6 +112,7 @@ void FeatureType::ApplyPatch(osm::EditableMapObject const & emo)
   uint32_t typesCount = 0;
   for (uint32_t const type : emo.GetTypes())
     m_types[typesCount++] = type;
+  m_bTypesParsed = true;
   m_header = CalculateHeader(typesCount, Header() & HEADER_GEOTYPE_MASK, m_params);
   m_bHeader2Parsed = true;
 }
@@ -145,13 +148,19 @@ editor::XMLFeature FeatureType::ToXML() const
   // feature.m_params.layer =
   // feature.m_params.rank =
 
-  // TODO(mgsergio): Save/Load types when required by feature creation or type modification.
-  // ParseTypes();
-  // for (auto const i : my::Range(GetTypesCount()))
-  // {
-  //   for (auto const & tag : osm::Editor::Instance().GetTagsForType(m_types[i]))
-  //     feature.SetTagValue(tag.first, tag.second);
-  // }
+  ParseTypes();
+  feature::TypesHolder th(*this);
+  // TODO(mgsergio): Store all types, not just the main one.
+  // TODO(mgsergio): Use correct SortBySpec based on the config.
+  th.SortBySpec();
+  string const strType = classif().GetReadableObjectName(th.GetBestType());
+  strings::SimpleTokenizer iter(strType, "-");
+  feature.SetTagValue(*iter, *++iter);
+//  for (auto const i : my::Range(GetTypesCount()))
+//  {
+//    for (auto const & tag : osm::Editor::Instance().GetTagsForType(m_types[i]))
+//      feature.SetTagValue(tag.first, tag.second);
+//  }
 
   for (auto const type : GetMetadata().GetPresentTypes())
   {
