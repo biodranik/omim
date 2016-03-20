@@ -20,7 +20,7 @@
 		<string>Icon-Small@2x.png</string>
 	</array>
 	<key>CFBundleIdentifier</key>
-	<string>com.mapswithme.travelguide</string>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -43,6 +43,8 @@
 	<string>MainWindow-iPad</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Enable Location Access</string>
 	<key>UIPrerenderedIcon</key>
 	<true/>
 	<key>UISupportedInterfaceOrientations</key>
@@ -54,6 +56,11 @@
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>UTImportedTypeDeclarations</key>
 	<array/>
 </dict>

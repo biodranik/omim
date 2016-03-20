@@ -24,6 +24,7 @@ private:
   bool m_isUpdatesEnabled;
 
 public:
+  virtual ~WindowHandle() {}
 
   WindowHandle() : m_hasPendingUpdates(false), m_isUpdatesEnabled(true)
   {}

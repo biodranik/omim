@@ -30,7 +30,7 @@ namespace iphone
 		/// Create shared render context.
 		RenderContext(RenderContext * renderContext);
 		/// Destroy render context
-		~RenderContext();
+		virtual ~RenderContext();
 		/// Make this rendering context current
 		void makeCurrent();
 		/// create a shared render context

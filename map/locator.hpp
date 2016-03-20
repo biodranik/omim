@@ -29,6 +29,7 @@ private:
 
 public:
 
+  virtual ~Locator() {}
   virtual void start(EMode mode) = 0;
   virtual void stop() = 0;
   virtual void setMode(EMode mode) = 0;

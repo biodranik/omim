@@ -10,7 +10,7 @@
 #define COUNTRIES_FILE  "countries.txt"
 #define DATA_UPDATE_FILE "maps.update"
 #define BINARY_UPDATE_FILE "binary.update"
-#define UPDATE_BASE_URL "http://data.mapswithme.com/"
+#define UPDATE_BASE_URL "http://new-search.mapswithme.com/"
 
 #define WORLD_FILE_NAME "World"
 

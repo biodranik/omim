@@ -15,6 +15,11 @@
   {
     self.locationManager = [[CLLocationManager alloc] init];
     self.locationManager.delegate = self;
+    if (kCLAuthorizationStatusNotDetermined == CLLocationManager.authorizationStatus)
+    {
+      [self.locationManager requestWhenInUseAuthorization];
+    }
+
 //    active = NO;
   }
   return self;
@@ -81,6 +86,12 @@
 	      didFailWithError: (NSError *) error
 {
 	[self.delegate OnLocationError: [error localizedDescription]];
+}
+
+- (void)locationManager:(CLLocationManager *)manager
+didChangeAuthorizationStatus:(CLAuthorizationStatus)status
+{
+  NSLog(@"Location authorization changed to %d", status);
 }
 
 @end

@@ -37,7 +37,8 @@
   GetSloynikEngine();
 
   // Add the tab bar controller's current view as a subview of the window
-  [window addSubview:mapViewController.view];
+  //[window addSubview:mapViewController.view];
+  [window setRootViewController:mapViewController];
   [window makeKeyAndVisible];
 }
 

@@ -35,4 +35,4 @@ public:
   virtual void CancelAllDownloads() = 0;
 };
 
-extern "C" DownloadManager & GetDownloadManager();
+DownloadManager & GetDownloadManager();

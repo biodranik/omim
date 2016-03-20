@@ -145,7 +145,7 @@ static bool IsOurIndex(TIndex const & theirs, TIndex const & ours)
 {
   cell.accessoryView = nil;
 	// do not show status for parent categories
-  if (cell.reuseIdentifier != @"ParentCell")
+  if (![cell.reuseIdentifier isEqual: @"ParentCell"])
   {
     switch (m_storage->CountryStatus(countryIndex))
     {

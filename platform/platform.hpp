@@ -80,6 +80,6 @@ public:
   virtual unsigned ScaleEtalonSize() const = 0;
 };
 
-extern "C" Platform & GetPlatform();
+Platform & GetPlatform();
 
 #include "../base/stop_mem_debug.hpp"

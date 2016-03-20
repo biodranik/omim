@@ -23,7 +23,7 @@
 
 string GetDeviceUid()
 {
-  NSString * uid = [[UIDevice currentDevice] uniqueIdentifier];
+  NSString * uid = [UIDevice currentDevice].identifierForVendor.UUIDString;
   return [uid UTF8String];
 }
 
